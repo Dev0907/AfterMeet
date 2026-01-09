@@ -27,7 +27,7 @@ const Landing = () => {
                     }} className="bg-neo-white">
                         Log Out
                     </NeoButton>
-                    <NeoButton className="bg-neo-red text-white">
+                    <NeoButton onClick={() => navigate('/meetings')} className="bg-neo-red text-white">
                         Explore More
                     </NeoButton>
                 </div>

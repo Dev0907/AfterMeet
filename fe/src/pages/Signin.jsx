@@ -28,7 +28,7 @@ const Signin = () => {
             if (response.ok) {
                 // Store authentication state
                 localStorage.setItem('userId', data.userId);
-                navigate('/landing');
+                navigate('/teams');
             } else {
                 setError(data.error || 'Signin failed');
             }
