@@ -1,0 +1,181 @@
+// This is your Prisma schema file,
+// learn more about it in the docs: https://pris.ly/d/prisma-schema
+
+generator client {
+  provider = "prisma-client-js"
+}
+
+datasource db {
+  provider = "postgresql"
+  url      = env("DATABASE_URL")
+}
+
+// 1. Users & Teams
+
+model User {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String?  @db.VarChar(100)
+  email     String?  @unique @db.VarChar(150)
+  role      String?  @db.VarChar(30) // "admin", "member"
+  timezone  String?  @db.VarChar(50)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  teamMembers         TeamMember[]
+  organizedMeetings   Meeting[]             @relation("OrganizedMeetings")
+  meetingParticipations MeetingParticipant[]
+  assignedTasks       Task[]
+  workloads           UserWorkload[]
+  smartSchedules      SmartSchedule[]
+
+  @@map("users")
+}
+
+model Team {
+  id        String   @id @default(uuid()) @db.Uuid
+  name      String?  @db.VarChar(100)
+  createdAt DateTime @default(now()) @map("created_at")
+
+  // Relations
+  members   TeamMember[]
+  meetings  Meeting[]
+
+  @@map("teams")
+}
+
+model TeamMember {
+  teamId String @map("team_id") @db.Uuid
+  userId String @map("user_id") @db.Uuid
+  role   String? @db.VarChar(30) // "owner", "member"
+
+  team Team @relation(fields: [teamId], references: [id])
+  user User @relation(fields: [userId], references: [id])
+
+  @@id([teamId, userId])
+  @@map("team_members")
+}
+
+// 2. Meetings
+
+model Meeting {
+  id             String    @id @default(uuid()) @db.Uuid
+  teamId         String?   @map("team_id") @db.Uuid
+  title          String?   @db.VarChar(200)
+  scheduledStart DateTime? @map("scheduled_start")
+  scheduledEnd   DateTime? @map("scheduled_end")
+  actualStart    DateTime? @map("actual_start")
+  actualEnd      DateTime? @map("actual_end")
+  platform       String?   @db.VarChar(50) // "Zoom", "Meet", "Teams"
+  organizerId    String?   @map("organizer_id") @db.Uuid
+  createdAt      DateTime  @default(now()) @map("created_at")
+
+  team      Team? @relation(fields: [teamId], references: [id])
+  organizer User? @relation("OrganizedMeetings", fields: [organizerId], references: [id])
+
+  participants MeetingParticipant[]
+  audios       MeetingAudio[]
+  transcripts  MeetingTranscript[]
+  summary      MeetingSummary?
+  tasks        Task[]
+
+  @@map("meetings")
+}
+
+model MeetingParticipant {
+  meetingId String    @map("meeting_id") @db.Uuid
+  userId    String    @map("user_id") @db.Uuid
+  joinTime  DateTime? @map("join_time")
+  leaveTime DateTime? @map("leave_time")
+
+  meeting Meeting @relation(fields: [meetingId], references: [id])
+  user    User    @relation(fields: [userId], references: [id])
+
+  @@id([meetingId, userId])
+  @@map("meeting_participants")
+}
+
+// 3. Audio, Transcripts & Summaries
+
+model MeetingAudio {
+  id              String  @id @default(uuid()) @db.Uuid
+  meetingId       String? @map("meeting_id") @db.Uuid
+  audioUrl        String? @map("audio_url") @db.Text
+  durationSeconds Int?    @map("duration_seconds")
+
+  meeting Meeting? @relation(fields: [meetingId], references: [id])
+
+  @@map("meeting_audio")
+}
+
+model MeetingTranscript {
+  id        String  @id @default(uuid()) @db.Uuid
+  meetingId String? @map("meeting_id") @db.Uuid
+  speaker   String? @db.VarChar(100)
+  text      String? @db.Text
+  startTime Float?  @map("start_time")
+  endTime   Float?  @map("end_time")
+
+  meeting Meeting? @relation(fields: [meetingId], references: [id])
+
+  @@map("meeting_transcripts")
+}
+
+model MeetingSummary {
+  meetingId String   @id @map("meeting_id") @db.Uuid
+  summary   String?  @db.Text
+  decisions String?  @db.Text
+  createdAt DateTime @default(now()) @map("created_at")
+
+  meeting Meeting @relation(fields: [meetingId], references: [id])
+
+  @@map("meeting_summaries")
+}
+
+// 4. Tasks & Action Items
+
+model Task {
+  id          String    @id @default(uuid()) @db.Uuid
+  meetingId   String?   @map("meeting_id") @db.Uuid
+  title       String?   @db.VarChar(200)
+  description String?   @db.Text
+  assignedTo  String?   @map("assigned_to") @db.Uuid
+  priority    String?   @db.VarChar(20) // "low", "medium", "high", "critical"
+  status      String?   @db.VarChar(30) // "pending", "in_progress", "done", "overdue"
+  dueDate     DateTime? @map("due_date")
+  createdAt   DateTime  @default(now()) @map("created_at")
+
+  meeting  Meeting? @relation(fields: [meetingId], references: [id])
+  assignee User?    @relation(fields: [assignedTo], references: [id])
+
+  smartSchedules SmartSchedule[]
+
+  @@map("tasks")
+}
+
+// 5. Smart Scheduling & Load Balancing
+
+model UserWorkload {
+  userId        String   @map("user_id") @db.Uuid
+  weekStart     DateTime @map("week_start") @db.Date // DATE type
+  totalTasks    Int?     @map("total_tasks")
+  overloadScore Float?   @map("overload_score")
+
+  user User @relation(fields: [userId], references: [id])
+
+  @@id([userId, weekStart])
+  @@map("user_workload")
+}
+
+model SmartSchedule {
+  id             String    @id @default(uuid()) @db.Uuid
+  userId         String?   @map("user_id") @db.Uuid
+  taskId         String?   @map("task_id") @db.Uuid
+  suggestedStart DateTime? @map("suggested_start")
+  suggestedEnd   DateTime? @map("suggested_end")
+  confidence     Float?
+
+  user User? @relation(fields: [userId], references: [id])
+  task Task? @relation(fields: [taskId], references: [id])
+
+  @@map("smart_schedule")
+}
