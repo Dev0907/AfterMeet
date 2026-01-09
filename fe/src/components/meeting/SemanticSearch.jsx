@@ -30,13 +30,17 @@ const SemanticSearch = ({
             setHasSearched(true);
 
             try {
+                let searchResults = null;
+
+                // Try API search first
                 if (onSearch) {
-                    const searchResults = await onSearch(query);
-                    setResults(searchResults);
-                } else {
-                    // Demo: Local search fallback
+                    searchResults = await onSearch(query);
+                }
+
+                // If API returned null or empty, use local search fallback
+                if (!searchResults || searchResults.length === 0) {
                     const queryLower = query.toLowerCase();
-                    const localResults = transcript
+                    searchResults = transcript
                         .filter(entry =>
                             entry.text.toLowerCase().includes(queryLower) ||
                             entry.speaker.toLowerCase().includes(queryLower)
@@ -46,10 +50,11 @@ const SemanticSearch = ({
                             excerpt: getExcerpt(entry.text, query),
                         }));
 
-                    // Simulate API delay
-                    await new Promise(resolve => setTimeout(resolve, 300));
-                    setResults(localResults);
+                    // Small delay for visual feedback
+                    await new Promise(resolve => setTimeout(resolve, 200));
                 }
+
+                setResults(searchResults || []);
             } catch (error) {
                 console.error('Search error:', error);
                 setResults([]);

@@ -1,7 +1,7 @@
 
 import React from 'react';
 
-const NeoInput = ({ label, type = 'text', value, onChange, placeholder, name, required = false }) => {
+const NeoInput = ({ label, type = 'text', value, onChange, placeholder, name, required = false, autoComplete }) => {
     return (
         <div className="flex flex-col gap-2 w-full">
             {label && <label className="font-bold text-black uppercase">{label}</label>}
@@ -12,6 +12,7 @@ const NeoInput = ({ label, type = 'text', value, onChange, placeholder, name, re
                 onChange={onChange}
                 placeholder={placeholder}
                 required={required}
+                autoComplete={autoComplete}
                 className="
           w-full bg-white text-black font-medium py-3 px-4
           border-4 border-black shadow-neo-sm outline-none
@@ -24,3 +25,4 @@ const NeoInput = ({ label, type = 'text', value, onChange, placeholder, name, re
 };
 
 export default NeoInput;
+

@@ -34,6 +34,11 @@ const MeetingDetail = () => {
     const [highlightedTranscriptId, setHighlightedTranscriptId] = useState(null);
     const [showSearch, setShowSearch] = useState(false);
 
+    // Scroll to top on mount
+    useEffect(() => {
+        window.scrollTo(0, 0);
+    }, [meetingId]);
+
     // Fetch meeting data
     useEffect(() => {
         const fetchMeetingData = async () => {
@@ -191,10 +196,10 @@ const MeetingDetail = () => {
                     />
                 </div>
 
-                {/* Two Column Layout for Desktop */}
+                {/* Two Column Layout for Desktop, stacked on mobile */}
                 <div className="grid grid-cols-1 lg:grid-cols-3 gap-6">
                     {/* Left Column - Main Content */}
-                    <div className="lg:col-span-2 space-y-6">
+                    <div className="lg:col-span-2 space-y-6 order-2 lg:order-1">
                         {/* Action Items (Primary) */}
                         <ActionItems
                             items={meetingData?.actionItems || []}
@@ -218,8 +223,8 @@ const MeetingDetail = () => {
                     </div>
 
                     {/* Right Column - Chat Panel */}
-                    <div className="lg:col-span-1">
-                        <div className="sticky top-24">
+                    <div className="lg:col-span-1 order-1 lg:order-2">
+                        <div className="lg:sticky lg:top-20">
                             <MeetingChat
                                 meetingId={meetingId}
                                 onSendMessage={handleChatMessage}

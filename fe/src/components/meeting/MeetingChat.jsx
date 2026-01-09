@@ -91,7 +91,7 @@ const MeetingChat = ({
     };
 
     return (
-        <div className="bg-white border-4 border-black shadow-neo flex flex-col h-full min-h-[500px]">
+        <div className="bg-white border-4 border-black shadow-neo flex flex-col h-auto lg:h-[calc(100vh-8rem)] min-h-[400px] max-h-[500px] lg:max-h-none">
             {/* Header */}
             <div className="p-4 border-b-4 border-black bg-neo-dark">
                 <h3 className="flex items-center gap-2 font-black uppercase text-black">
