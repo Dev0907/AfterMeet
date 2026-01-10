@@ -7,6 +7,7 @@ import TeamsList from './pages/TeamsList';
 import TeamMeetings from './pages/TeamMeetings';
 import MeetingDetail from './pages/MeetingDetail';
 import MeetingAnalytics from './pages/MeetingAnalytics';
+import JoinTeam from './pages/JoinTeam';
 
 import ProtectedRoute from './components/ProtectedRoute';
 
@@ -23,6 +24,10 @@ function App() {
         <Route path="/" element={<HomeRedirect />} />
         <Route path="/signin" element={<Signin />} />
         <Route path="/signup" element={<Signup />} />
+
+        {/* Join team via invite code */}
+        <Route path="/join" element={<JoinTeam />} />
+        <Route path="/join/:inviteCode" element={<JoinTeam />} />
 
         {/* Teams-based navigation */}
         <Route path="/teams" element={

@@ -48,9 +48,10 @@ model OtpCode {
 }
 
 model Team {
-  id        String   @id @default(uuid()) @db.Uuid
-  name      String?  @db.VarChar(100)
-  createdAt DateTime @default(now()) @map("created_at")
+  id         String   @id @default(uuid()) @db.Uuid
+  name       String?  @db.VarChar(100)
+  inviteCode String?  @unique @map("invite_code") @db.VarChar(10)
+  createdAt  DateTime @default(now()) @map("created_at")
 
   // Relations
   members   TeamMember[]

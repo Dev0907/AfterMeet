@@ -14,35 +14,10 @@ import {
     X,
     UserPlus,
     LogOut,
+    Link2,
 } from 'lucide-react';
 
-// Mock data for demo
-const MOCK_TEAMS = [
-    {
-        id: 'team-1',
-        name: 'Product Team',
-        memberCount: 5,
-        meetingCount: 12,
-        lastMeeting: '2026-01-09T10:00:00Z',
-        role: 'owner',
-    },
-    {
-        id: 'team-2',
-        name: 'Engineering',
-        memberCount: 8,
-        meetingCount: 24,
-        lastMeeting: '2026-01-08T14:30:00Z',
-        role: 'member',
-    },
-    {
-        id: 'team-3',
-        name: 'Design Sprint',
-        memberCount: 3,
-        meetingCount: 6,
-        lastMeeting: '2026-01-07T09:00:00Z',
-        role: 'member',
-    },
-];
+const API_BASE = 'http://localhost:3000';
 
 /**
  * TeamsList - Shows all teams the user belongs to
@@ -53,23 +28,29 @@ const TeamsList = () => {
     const [teams, setTeams] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
     const [showCreateModal, setShowCreateModal] = useState(false);
+    const [showJoinModal, setShowJoinModal] = useState(false);
     const [newTeamName, setNewTeamName] = useState('');
+    const [joinCode, setJoinCode] = useState('');
+    const [joinError, setJoinError] = useState('');
 
     // Fetch teams on mount
     useEffect(() => {
         const fetchTeams = async () => {
             setIsLoading(true);
-            try {
-                // TODO: Replace with actual API call
-                // const response = await fetch(`/api/teams?userId=${localStorage.getItem('userId')}`);
-                // const data = await response.json();
+            const userId = localStorage.getItem('userId');
 
-                // Using mock data for demo
-                await new Promise(resolve => setTimeout(resolve, 500));
-                setTeams(MOCK_TEAMS);
+            try {
+                const response = await fetch(`${API_BASE}/api/teams?userId=${userId}`);
+                if (response.ok) {
+                    const data = await response.json();
+                    setTeams(data);
+                } else {
+                    console.error('Failed to fetch teams');
+                    setTeams([]);
+                }
             } catch (err) {
                 console.error('Error fetching teams:', err);
-                setTeams(MOCK_TEAMS);
+                setTeams([]);
             } finally {
                 setIsLoading(false);
             }
@@ -82,19 +63,62 @@ const TeamsList = () => {
         e.preventDefault();
         if (!newTeamName.trim()) return;
 
-        // Demo: Add team locally
-        const newTeam = {
-            id: `team-${Date.now()}`,
-            name: newTeamName.trim(),
-            memberCount: 1,
-            meetingCount: 0,
-            lastMeeting: null,
-            role: 'owner',
-        };
+        const userId = localStorage.getItem('userId');
 
-        setTeams(prev => [newTeam, ...prev]);
-        setNewTeamName('');
-        setShowCreateModal(false);
+        try {
+            const response = await fetch(`${API_BASE}/api/teams`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ name: newTeamName.trim(), userId })
+            });
+
+            if (response.ok) {
+                const newTeam = await response.json();
+                setTeams(prev => [newTeam, ...prev]);
+                setNewTeamName('');
+                setShowCreateModal(false);
+            } else {
+                console.error('Failed to create team');
+            }
+        } catch (err) {
+            console.error('Error creating team:', err);
+        }
+    };
+
+    const handleJoinTeam = async (e) => {
+        e.preventDefault();
+        if (!joinCode.trim()) return;
+
+        const userId = localStorage.getItem('userId');
+        setJoinError('');
+
+        try {
+            const response = await fetch(`${API_BASE}/api/teams/join`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ inviteCode: joinCode.trim().toUpperCase(), userId })
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                // Refresh teams list
+                const teamsResponse = await fetch(`${API_BASE}/api/teams?userId=${userId}`);
+                if (teamsResponse.ok) {
+                    const teamsData = await teamsResponse.json();
+                    setTeams(teamsData);
+                }
+                setJoinCode('');
+                setShowJoinModal(false);
+                // Navigate to the joined team
+                navigate(`/teams/${data.teamId}/meetings`);
+            } else {
+                setJoinError(data.error || 'Failed to join team');
+            }
+        } catch (err) {
+            console.error('Error joining team:', err);
+            setJoinError('Failed to join team. Please try again.');
+        }
     };
 
     const handleLogout = () => {
@@ -145,6 +169,13 @@ const TeamsList = () => {
                             </p>
                         </div>
                         <div className="flex gap-2">
+                            <NeoButton
+                                onClick={() => setShowJoinModal(true)}
+                                className="bg-white"
+                            >
+                                <Link2 size={18} className="mr-2" />
+                                Join Team
+                            </NeoButton>
                             <NeoButton
                                 onClick={() => setShowCreateModal(true)}
                                 className="bg-neo-teal"
@@ -260,6 +291,47 @@ const TeamsList = () => {
 
                             <NeoButton type="submit" className="w-full bg-neo-teal">
                                 Create Team
+                            </NeoButton>
+                        </form>
+                    </NeoCard>
+                </div>
+            )}
+
+            {/* Join Team Modal */}
+            {showJoinModal && (
+                <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
+                    <NeoCard className="w-full max-w-md relative">
+                        <button
+                            onClick={() => { setShowJoinModal(false); setJoinError(''); setJoinCode(''); }}
+                            className="absolute top-4 right-4 p-1 border-2 border-black hover:bg-neo-red transition-colors"
+                        >
+                            <X size={20} />
+                        </button>
+
+                        <h2 className="text-2xl font-black uppercase mb-2">Join Team</h2>
+                        <p className="text-sm font-medium text-gray-600 mb-4">
+                            Enter the invite code shared by the team host
+                        </p>
+
+                        <form onSubmit={handleJoinTeam} className="space-y-4">
+                            <NeoInput
+                                label="Invite Code"
+                                name="inviteCode"
+                                placeholder="e.g., ABCD1234"
+                                value={joinCode}
+                                onChange={(e) => setJoinCode(e.target.value.toUpperCase())}
+                                required
+                            />
+
+                            {joinError && (
+                                <div className="p-3 bg-neo-red text-white font-bold border-4 border-black">
+                                    {joinError}
+                                </div>
+                            )}
+
+                            <NeoButton type="submit" className="w-full bg-neo-teal">
+                                <UserPlus size={18} className="mr-2" />
+                                Join Team
                             </NeoButton>
                         </form>
                     </NeoCard>
