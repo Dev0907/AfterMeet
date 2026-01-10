@@ -21,6 +21,7 @@ const MeetingDetail = () => {
     const [meeting, setMeeting] = useState(null);
     const [transcript, setTranscript] = useState([]);
     const [aiSummary, setAiSummary] = useState(null);
+    const [pythonMeetingId, setPythonMeetingId] = useState(null);
     const [isLoading, setIsLoading] = useState(true);
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [error, setError] = useState(null);
@@ -38,7 +39,12 @@ const MeetingDetail = () => {
                 const { data } = await meetingsApi.getById(meetingId);
                 setMeeting(data);
                 if (data.transcript?.length > 0) setTranscript(data.transcript);
-                if (data.summary) setAiSummary(data.summary);
+                if (data.summary) {
+                    setAiSummary(data.summary);
+                    if (data.summary.python_meeting_id) {
+                        setPythonMeetingId(data.summary.python_meeting_id);
+                    }
+                }
             } catch (err) {
                 console.error('Error fetching meeting:', err);
                 setError('Meeting not found');
@@ -57,13 +63,19 @@ const MeetingDetail = () => {
             const { data } = await aiApi.analyze({ transcript: transcriptText, meeting_id: meetingId });
             console.log('[Analyze Response]', data);
             
+            if (data.python_meeting_id) {
+                setPythonMeetingId(data.python_meeting_id);
+                console.log('[Analyze] Python meeting ID:', data.python_meeting_id);
+            }
+            
             const summaryData = {
                 ...data.summary,
                 topics: data.topics,
                 tasks: data.tasks,
                 speakers: data.speakers,
                 sentiment: data.sentiment,
-                overall_sentiment: data.overall_sentiment
+                overall_sentiment: data.overall_sentiment,
+                python_meeting_id: data.python_meeting_id
             };
             setAiSummary(summaryData);
             
@@ -107,9 +119,12 @@ const MeetingDetail = () => {
     };
 
     const handleChat = async (question) => {
+        if (!pythonMeetingId) {
+            return { response: 'Please analyze the meeting first before chatting.' };
+        }
         try {
-            console.log('[Chat] Sending question:', question, 'for meeting:', meetingId);
-            const { data } = await aiApi.chat(meetingId, { question });
+            console.log('[Chat] Sending question:', question, 'python_meeting_id:', pythonMeetingId);
+            const { data } = await aiApi.chat(meetingId, { question, python_meeting_id: pythonMeetingId });
             console.log('[Chat] Response:', data);
             return { response: data.answer || data.response || 'No response received' };
         } catch (err) {

@@ -72,7 +72,8 @@ app.post('/api/analyze', async (req, res) => {
     });
     
     const data = response.data;
-    log('AI', '/api/analyze', 'Python API response received', { status: response.status });
+    const pythonMeetingId = data.meeting_id;
+    log('AI', '/api/analyze', 'Python API response received', { status: response.status, pythonMeetingId });
 
     const meetingId = meeting_id;
 
@@ -83,7 +84,8 @@ app.post('/api/analyze', async (req, res) => {
         speakers: data.speakers,
         tasks: data.tasks,
         topics: data.topics,
-        overall_sentiment: data.overall_sentiment
+        overall_sentiment: data.overall_sentiment,
+        python_meeting_id: pythonMeetingId
       };
 
       await prisma.meetingSummary.upsert({
@@ -110,8 +112,8 @@ app.post('/api/analyze', async (req, res) => {
       }
     }
     
-    log('AI', '/api/analyze', 'Analysis complete, sending response');
-    res.json(data);
+    log('AI', '/api/analyze', 'Analysis complete with python_meeting_id:', pythonMeetingId);
+    res.json({ ...data, python_meeting_id: pythonMeetingId });
   } catch (error) {
     log('ERROR', '/api/analyze', 'Python API error', { error: error.message, response: error.response?.data });
     if (error.response) {
@@ -124,10 +126,16 @@ app.post('/api/analyze', async (req, res) => {
 
 // Chat with meeting
 app.post('/api/meetings/:meetingId/chat', async (req, res) => {
-  log('AI', '/api/meetings/chat', 'Chat request', { meetingId: req.params.meetingId, question: req.body.question?.substring(0, 50) });
+  const pythonMeetingId = req.body.python_meeting_id;
+  log('AI', '/api/meetings/chat', 'Chat request', { dbMeetingId: req.params.meetingId, pythonMeetingId, question: req.body.question?.substring(0, 50) });
+  
+  if (!pythonMeetingId) {
+    return res.status(400).json({ error: 'python_meeting_id is required. Please analyze the meeting first.' });
+  }
+  
   try {
     const response = await axios.post(`${PYTHON_API_URL}/api/chat`, {
-      meeting_id: req.params.meetingId,
+      meeting_id: pythonMeetingId,
       question: req.body.question
     }, { timeout: 60000 });
     
