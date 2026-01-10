@@ -84,6 +84,11 @@ model Meeting {
   actualEnd      DateTime? @map("actual_end")
   platform       String?   @db.VarChar(50) // "Zoom", "Meet", "Teams"
   organizerId    String?   @map("organizer_id") @db.Uuid
+  
+  // Auto-Joiner fields
+  joinUrl         String?   @map("join_url") @db.Text
+  autoJoinEnabled Boolean   @default(false) @map("auto_join_enabled")
+
   createdAt      DateTime  @default(now()) @map("created_at")
 
   team      Team? @relation(fields: [teamId], references: [id])
@@ -104,7 +109,7 @@ model MeetingParticipant {
   joinTime  DateTime? @map("join_time")
   leaveTime DateTime? @map("leave_time")
 
-  meeting Meeting @relation(fields: [meetingId], references: [id])
+  meeting Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
   user    User    @relation(fields: [userId], references: [id])
 
   @@id([meetingId, userId])
@@ -119,7 +124,7 @@ model MeetingAudio {
   audioUrl        String? @map("audio_url") @db.Text
   durationSeconds Int?    @map("duration_seconds")
 
-  meeting Meeting? @relation(fields: [meetingId], references: [id])
+  meeting Meeting? @relation(fields: [meetingId], references: [id], onDelete: Cascade)
 
   @@map("meeting_audio")
 }
@@ -129,10 +134,11 @@ model MeetingTranscript {
   meetingId String? @map("meeting_id") @db.Uuid
   speaker   String? @db.VarChar(100)
   text      String? @db.Text
+  sentiment String? @db.VarChar(20) // positive, neutral, negative
   startTime Float?  @map("start_time")
   endTime   Float?  @map("end_time")
 
-  meeting Meeting? @relation(fields: [meetingId], references: [id])
+  meeting Meeting? @relation(fields: [meetingId], references: [id], onDelete: Cascade)
 
   @@map("meeting_transcripts")
 }
@@ -143,7 +149,7 @@ model MeetingSummary {
   decisions String?  @db.Text
   createdAt DateTime @default(now()) @map("created_at")
 
-  meeting Meeting @relation(fields: [meetingId], references: [id])
+  meeting Meeting @relation(fields: [meetingId], references: [id], onDelete: Cascade)
 
   @@map("meeting_summaries")
 }
@@ -161,7 +167,7 @@ model Task {
   dueDate     DateTime? @map("due_date")
   createdAt   DateTime  @default(now()) @map("created_at")
 
-  meeting  Meeting? @relation(fields: [meetingId], references: [id])
+  meeting  Meeting? @relation(fields: [meetingId], references: [id], onDelete: Cascade)
   assignee User?    @relation(fields: [assignedTo], references: [id])
 
   smartSchedules SmartSchedule[]

@@ -28,10 +28,7 @@ const NeoBadge = ({ variant = 'neutral', children, className = '', size = 'md' }
         critical: '🔴',
         high: '🟠',
         medium: '🟡',
-        low: '🟢',
-        positive: '🟢',
-        neutral: '🟡',
-        negative: '🔴',
+        low: '🟢'
     };
 
     return (

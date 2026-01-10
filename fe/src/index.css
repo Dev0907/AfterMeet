@@ -11,6 +11,8 @@
   /* Pastel Purple/Lavender - acting as a secondary dark or accent */
   --color-neo-white: #FFFFFC;
   /* Soft White */
+  --color-neo-orange: #FF991C;
+  --color-neo-blue: #305CDE;
 
   /* Retaining some bold accents for contrast if needed, but per request "pastel" */
   /* Actually, to keep it "Neobrutalist", we need high contrast with the black borders */
