@@ -1,5 +1,5 @@
 
-import React, { useState, useEffect, useRef } from 'react';
+import { useState, useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import NeoCard from '../components/ui/NeoCard';
 import NeoButton from '../components/ui/NeoButton';
@@ -64,10 +64,10 @@ const MeetingsList = () => {
     const handleFileUpload = async (file) => {
         if (!file) return;
 
-        // Validate file type
-        const validTypes = ['audio/mp3', 'audio/mpeg', 'audio/wav', 'video/mp4', 'audio/m4a'];
-        if (!validTypes.includes(file.type) && !file.name.match(/\.(mp3|wav|mp4|m4a)$/i)) {
-            setUploadStatus({ type: 'error', message: 'Please upload an audio or video file (MP3, WAV, MP4, M4A)' });
+        const validTypes = ['audio/mp3', 'audio/mpeg', 'audio/wav', 'video/mp4', 'audio/m4a', 'text/plain'];
+        const validExtensions = /\.(mp3|wav|mp4|m4a|txt)$/i;
+        if (!validTypes.includes(file.type) && !file.name.match(validExtensions)) {
+            setUploadStatus({ type: 'error', message: 'Please upload an audio, video, or text file (MP3, WAV, MP4, M4A, TXT)' });
             return;
         }
 
@@ -207,7 +207,7 @@ const MeetingsList = () => {
                     <input
                         ref={fileInputRef}
                         type="file"
-                        accept=".mp3,.wav,.mp4,.m4a,audio/*,video/*"
+                        accept=".mp3,.wav,.mp4,.m4a,.txt,audio/*,video/*"
                         onChange={(e) => handleFileUpload(e.target.files[0])}
                         className="hidden"
                     />
@@ -224,7 +224,7 @@ const MeetingsList = () => {
                                 Drop your meeting recording here
                             </p>
                             <p className="text-sm text-gray-500 font-medium">
-                                or click to browse • Supports MP3, WAV, MP4, M4A
+                                or click to browse • Supports MP3, WAV, MP4, M4A, TXT
                             </p>
                         </>
                     )}

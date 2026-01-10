@@ -1,4 +1,3 @@
-
 import React, { useState } from 'react';
 import NeoButton from '../components/ui/NeoButton';
 import NeoInput from '../components/ui/NeoInput';
@@ -6,6 +5,7 @@ import NeoCard from '../components/ui/NeoCard';
 import OtpVerification from '../components/ui/OtpVerification';
 import { Link, useNavigate } from 'react-router-dom';
 import { ArrowLeft, Loader2 } from 'lucide-react';
+import { authApi } from '../services/api';
 
 const Signup = () => {
     const navigate = useNavigate();
@@ -17,8 +17,6 @@ const Signup = () => {
     });
     const [error, setError] = useState('');
     const [isLoading, setIsLoading] = useState(false);
-
-    // OTP Verification state
     const [showOtpModal, setShowOtpModal] = useState(false);
     const [pendingUserId, setPendingUserId] = useState(null);
     const [otpError, setOtpError] = useState(null);
@@ -32,7 +30,6 @@ const Signup = () => {
         e.preventDefault();
         setError('');
 
-        // Password Validation
         const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
         if (!passwordRegex.test(formData.password)) {
             setError('Password must be 8+ chars, with Upper, Lower, Number & Special Char.');
@@ -41,23 +38,17 @@ const Signup = () => {
 
         setIsLoading(true);
         try {
-            const response = await fetch('http://localhost:3000/api/auth/signup', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify(formData),
-            });
-
-            const data = await response.json();
-
-            if (response.ok || data.pendingVerification) {
-                // Show OTP verification modal
-                setPendingUserId(data.userId);
+            const { data } = await authApi.signup(formData);
+            setPendingUserId(data.userId);
+            setShowOtpModal(true);
+        } catch (err) {
+            const response = err.response?.data;
+            if (response?.pendingVerification) {
+                setPendingUserId(response.userId);
                 setShowOtpModal(true);
             } else {
-                setError(data.error || 'Signup failed');
+                setError(response?.error || 'Connection failed. Is the server running?');
             }
-        } catch {
-            setError('Connection failed. Is the server running?');
         } finally {
             setIsLoading(false);
         }
@@ -68,23 +59,11 @@ const Signup = () => {
         setIsVerifying(true);
 
         try {
-            const response = await fetch('http://localhost:3000/api/auth/verify-otp', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ userId: pendingUserId, otp }),
-            });
-
-            const data = await response.json();
-
-            if (response.ok) {
-                // Verification successful
-                localStorage.setItem('userId', data.userId);
-                navigate('/teams');
-            } else {
-                setOtpError(data.error || 'Verification failed');
-            }
-        } catch {
-            setOtpError('Connection failed. Please try again.');
+            const { data } = await authApi.verifyOtp({ userId: pendingUserId, otp });
+            localStorage.setItem('userId', data.userId);
+            navigate('/teams');
+        } catch (err) {
+            setOtpError(err.response?.data?.error || 'Verification failed');
         } finally {
             setIsVerifying(false);
         }
@@ -92,24 +71,14 @@ const Signup = () => {
 
     const handleResendOtp = async () => {
         try {
-            const response = await fetch('http://localhost:3000/api/auth/resend-otp', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ userId: pendingUserId }),
-            });
-
-            if (!response.ok) {
-                const data = await response.json();
-                setOtpError(data.error || 'Failed to resend OTP');
-            }
-        } catch {
-            setOtpError('Connection failed. Please try again.');
+            await authApi.resendOtp({ userId: pendingUserId });
+        } catch (err) {
+            setOtpError(err.response?.data?.error || 'Failed to resend OTP');
         }
     };
 
     return (
         <div className="min-h-screen bg-neo-yellow flex flex-col items-center justify-center p-4 relative overflow-hidden">
-            {/* Background Decor */}
             <div className="absolute top-10 left-10 w-32 h-32 bg-neo-red border-4 border-black rounded-full mix-blend-multiply filter blur-sm animate-pulse"></div>
             <div className="absolute bottom-10 right-10 w-48 h-48 bg-neo-teal border-4 border-black rotate-12 mix-blend-multiply"></div>
 
@@ -162,7 +131,6 @@ const Signup = () => {
                         </p>
                     </div>
 
-
                     <NeoButton type="submit" className="mt-4 bg-neo-teal" disabled={isLoading}>
                         {isLoading ? (
                             <>
@@ -183,7 +151,6 @@ const Signup = () => {
                 </p>
             </NeoCard>
 
-            {/* OTP Verification Modal */}
             {showOtpModal && (
                 <OtpVerification
                     email={formData.email}

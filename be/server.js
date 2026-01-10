@@ -4,19 +4,37 @@ const cors = require('cors');
 require('dotenv').config();
 const { PrismaClient } = require('@prisma/client');
 const { generateOtp, sendOtpEmail } = require('./services/emailService');
+const axios = require('axios');
+const FormData = require('form-data');
 
 const app = express();
 const prisma = new PrismaClient();
 const PORT = process.env.PORT || 3000;
 
 // Python AI API URL
-const PYTHON_API_URL = process.env.PYTHON_API_URL || 'http://127.0.0.1:5001';
+const PYTHON_API_URL = process.env.PYTHON_API_URL || 'http://127.0.0.1:5000';
 
 // OTP expiry time in minutes
 const OTP_EXPIRY_MINUTES = 10;
 
 app.use(cors());
-app.use(express.json({ limit: '10mb' })); // Increase limit for transcripts
+app.use(express.json({ limit: '10mb' }));
+
+const log = (type, route, message, data = null) => {
+  const timestamp = new Date().toISOString();
+  const logData = data ? JSON.stringify(data).substring(0, 200) : '';
+  console.log(`[${timestamp}] [${type}] ${route} - ${message} ${logData}`);
+};
+
+app.use((req, res, next) => {
+  log('REQUEST', `${req.method} ${req.path}`, 'Incoming request', req.body?.meeting_id || req.query?.userId || '');
+  const originalSend = res.send;
+  res.send = function(body) {
+    log('RESPONSE', `${req.method} ${req.path}`, `Status: ${res.statusCode}`);
+    return originalSend.call(this, body);
+  };
+  next();
+});
 
 // Basic health check
 app.get('/health', (req, res) => {
@@ -29,77 +47,84 @@ app.get('/health', (req, res) => {
 
 // Analyze transcript
 app.post('/api/analyze', async (req, res) => {
+  log('AI', '/api/analyze', 'Starting transcript analysis', { meeting_id: req.body.meeting_id });
   try {
-    const response = await fetch(`${PYTHON_API_URL}/analyze`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(req.body)
-    });
-    const data = await response.json();
-
-    // Save summary to database
-    if (data.summary && data.meeting_id) {
-      // Find DB meeting ID if different from Python ID (assuming they match for now)
-      // If Python generates a new ID but we have an existing one, user passed meeting_id in body
-      const meetingId = req.body.meeting_id;
-
-      if (meetingId) {
-        // 1. Save Full Analysis Package as Summary
-        const analysisPackage = {
-          ...data.summary, // detailed text, duration, etc
-          sentiment: data.sentiment,
-          speakers: data.speakers,
-          tasks: data.tasks,
-          topics: data.topics,
-          overall_sentiment: data.overall_sentiment
-        };
-
-        await prisma.meetingSummary.upsert({
-          where: { meetingId },
-          update: { summary: JSON.stringify(analysisPackage) },
-          create: { meetingId, summary: JSON.stringify(analysisPackage) }
-        });
-
-        // 2. Update Transcript Sentiment (Sync Python results to DB)
-        if (data.transcript && Array.isArray(data.transcript)) {
-          // We need to match Python transcript entries back to DB records.
-          // Since we can't easily match by ID (Python doesn't know DB IDs unless we sent them),
-          // we'll update based on startTime/text match, OR simpler: delete and recreate?
-          // Recreating is risky if we lose other metadata.
-          // Better approach: We assume the order is preserved or we fetch headers.
-
-          // Let's try to update matching records by text snippet or just bulk replace for this MVP.
-          // Bulk replace is safer to ensure sync.
-
-          // Delete old transcripts for this meeting
-          await prisma.meetingTranscript.deleteMany({
-            where: { meetingId }
-          });
-
-          // Insert new transcripts with sentiment
-          await prisma.meetingTranscript.createMany({
-            data: data.transcript.map((t, index) => ({
-              meetingId,
-              speaker: t.speaker_name || t.speaker || 'Unknown',
-              text: t.text,
-              sentiment: t.sentiment, // The missing piece!
-              startTime: t.timestamp ? parseTimestamp(t.timestamp) : index * 10,
-              endTime: (t.timestamp ? parseTimestamp(t.timestamp) : index * 10) + 10
-            }))
-          });
-        }
-      }
+    const { transcript, meeting_id } = req.body;
+    
+    if (!transcript) {
+      return res.status(400).json({ error: 'Transcript is required' });
     }
 
-    res.status(response.status).json(data);
+    const formData = new FormData();
+    const transcriptBuffer = Buffer.from(transcript, 'utf-8');
+    formData.append('file', transcriptBuffer, {
+      filename: 'transcript.txt',
+      contentType: 'text/plain',
+    });
+
+    log('AI', '/api/analyze', 'Sending file to Python API');
+    
+    const response = await axios.post(`${PYTHON_API_URL}/api/analyze`, formData, {
+      headers: {
+        ...formData.getHeaders(),
+      },
+      timeout: 120000,
+    });
+    
+    const data = response.data;
+    log('AI', '/api/analyze', 'Python API response received', { status: response.status });
+
+    const meetingId = meeting_id;
+
+    if (meetingId && data.summary) {
+      const analysisPackage = {
+        ...data.summary,
+        sentiment: data.sentiment,
+        speakers: data.speakers,
+        tasks: data.tasks,
+        topics: data.topics,
+        overall_sentiment: data.overall_sentiment
+      };
+
+      await prisma.meetingSummary.upsert({
+        where: { meetingId },
+        update: { summary: JSON.stringify(analysisPackage) },
+        create: { meetingId, summary: JSON.stringify(analysisPackage) }
+      });
+
+      if (data.transcript && Array.isArray(data.transcript)) {
+        await prisma.meetingTranscript.deleteMany({
+          where: { meetingId }
+        });
+
+        await prisma.meetingTranscript.createMany({
+          data: data.transcript.map((t, index) => ({
+            meetingId,
+            speaker: t.speaker_name || t.speaker || 'Unknown',
+            text: t.text,
+            sentiment: t.sentiment,
+            startTime: t.timestamp ? parseTimestamp(t.timestamp) : index * 10,
+            endTime: (t.timestamp ? parseTimestamp(t.timestamp) : index * 10) + 10
+          }))
+        });
+      }
+    }
+    
+    log('AI', '/api/analyze', 'Analysis complete, sending response');
+    res.json(data);
   } catch (error) {
-    console.error('Python API error:', error);
-    res.status(503).json({ error: 'AI service unavailable. Make sure Python API is running.' });
+    log('ERROR', '/api/analyze', 'Python API error', { error: error.message, response: error.response?.data });
+    if (error.response) {
+      res.status(error.response.status).json(error.response.data);
+    } else {
+      res.status(503).json({ error: 'AI service unavailable. Make sure Python API is running.' });
+    }
   }
 });
 
 // Chat with meeting
 app.post('/api/meetings/:meetingId/chat', async (req, res) => {
+  log('AI', '/api/meetings/chat', 'Chat request', { meetingId: req.params.meetingId, question: req.body.question?.substring(0, 50) });
   try {
     const response = await fetch(`${PYTHON_API_URL}/chat`, {
       method: 'POST',
@@ -110,15 +135,17 @@ app.post('/api/meetings/:meetingId/chat', async (req, res) => {
       })
     });
     const data = await response.json();
+    log('AI', '/api/meetings/chat', 'Chat response received');
     res.status(response.status).json(data);
   } catch (error) {
-    console.error('Python API error:', error);
+    log('ERROR', '/api/meetings/chat', 'Python API error', { error: error.message });
     res.status(503).json({ error: 'AI service unavailable. Make sure Python API is running.' });
   }
 });
 
 // Semantic search
 app.post('/api/meetings/:meetingId/search', async (req, res) => {
+  log('AI', '/api/meetings/search', 'Search request', { meetingId: req.params.meetingId, query: req.body.query?.substring(0, 50) });
   try {
     const response = await fetch(`${PYTHON_API_URL}/search`, {
       method: 'POST',
@@ -129,15 +156,17 @@ app.post('/api/meetings/:meetingId/search', async (req, res) => {
       })
     });
     const data = await response.json();
+    log('AI', '/api/meetings/search', 'Search response received');
     res.status(response.status).json(data);
   } catch (error) {
-    console.error('Python API error:', error);
+    log('ERROR', '/api/meetings/search', 'Python API error', { error: error.message });
     res.status(503).json({ error: 'AI service unavailable. Make sure Python API is running.' });
   }
 });
 
 // Schedule Auto-Join
 app.post('/api/schedule-join', async (req, res) => {
+  log('AI', '/api/schedule-join', 'Schedule join request', { link: req.body.link?.substring(0, 30) });
   try {
     const response = await fetch(`${PYTHON_API_URL}/schedule-join`, {
       method: 'POST',
@@ -145,9 +174,10 @@ app.post('/api/schedule-join', async (req, res) => {
       body: JSON.stringify(req.body)
     });
     const data = await response.json();
+    log('AI', '/api/schedule-join', 'Schedule join response received');
     res.status(response.status).json(data);
   } catch (error) {
-    console.error('Python API error:', error);
+    log('ERROR', '/api/schedule-join', 'Python API error', { error: error.message });
     res.status(503).json({ error: 'AI service unavailable. Make sure Python API is running.' });
   }
 });
