@@ -55,7 +55,18 @@ const MeetingDetail = () => {
         try {
             const transcriptText = transcript.map(t => `${t.speaker}: ${t.text}`).join('\n');
             const { data } = await aiApi.analyze({ transcript: transcriptText, meeting_id: meetingId });
-            setAiSummary(data.summary);
+            console.log('[Analyze Response]', data);
+            
+            const summaryData = {
+                ...data.summary,
+                topics: data.topics,
+                tasks: data.tasks,
+                speakers: data.speakers,
+                sentiment: data.sentiment,
+                overall_sentiment: data.overall_sentiment
+            };
+            setAiSummary(summaryData);
+            
             if (data.transcript) {
                 setTranscript(data.transcript.map((t, i) => ({
                     id: i, speaker: t.speaker_name || t.speaker || 'Speaker',
@@ -69,13 +80,41 @@ const MeetingDetail = () => {
         }
     };
 
+    const getSummaryText = () => {
+        const summary = aiSummary || meeting?.summary;
+        if (!summary) return 'Upload a transcript and click "Analyze with AI" to generate insights.';
+        
+        if (summary.summary_text) return summary.summary_text;
+        if (summary.overview) return summary.overview;
+        if (typeof summary === 'string') return summary;
+        
+        const parts = [];
+        const topics = summary.topics || aiSummary?.topics;
+        const tasks = summary.tasks || aiSummary?.tasks;
+        const speakers = summary.speakers || aiSummary?.speakers;
+        
+        if (speakers && Object.keys(speakers).length > 0) {
+            parts.push(`Meeting with ${Object.keys(speakers).length} participants: ${Object.keys(speakers).join(', ')}.`);
+        }
+        if (topics?.length > 0) {
+            parts.push(`Key topics discussed: ${topics.slice(0, 5).join(', ')}.`);
+        }
+        if (tasks?.length > 0) {
+            parts.push(`${tasks.length} action item(s) identified.`);
+        }
+        
+        return parts.length > 0 ? parts.join(' ') : 'Analysis complete. See topics and action items below.';
+    };
+
     const handleChat = async (question) => {
         try {
-            const { data } = await aiApi.chat(meetingId, { question, transcript, summary: aiSummary || meeting?.summary || {} });
-            return { response: data.response };
+            console.log('[Chat] Sending question:', question, 'for meeting:', meetingId);
+            const { data } = await aiApi.chat(meetingId, { question });
+            console.log('[Chat] Response:', data);
+            return { response: data.answer || data.response || 'No response received' };
         } catch (err) {
-            console.error('Chat error:', err);
-            return { response: 'Failed to get AI response. Make sure the Python API is running.' };
+            console.error('[Chat] Error:', err);
+            return { response: err.response?.data?.error || 'Failed to get AI response. Make sure the Python API is running.' };
         }
     };
 
@@ -166,7 +205,7 @@ const MeetingDetail = () => {
                                             </NeoButton>
                                         </div>
                                     )}
-                                    <p className="font-medium leading-relaxed">{aiSummary?.summary_text || meeting?.summary?.summary_text || aiSummary?.overview || meeting?.summary?.overview || (typeof meeting?.summary === 'string' ? meeting?.summary : 'Upload a transcript and click "Analyze with AI" to generate insights.')}</p>
+                                    <p className="font-medium leading-relaxed">{getSummaryText()}</p>
                                     {(aiSummary?.topics || meeting?.summary?.topics || meeting?.topics)?.length > 0 && (
                                         <div className="mt-4">
                                             <p className="font-bold text-sm uppercase mb-2">Topics Discussed</p>

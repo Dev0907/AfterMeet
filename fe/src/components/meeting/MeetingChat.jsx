@@ -1,16 +1,11 @@
 
-import React, { useState, useRef, useEffect } from 'react';
-import NeoButton from '../ui/NeoButton';
+import { useState, useRef, useEffect } from 'react';
 import { MessageCircle, Send, Loader2, Sparkles } from 'lucide-react';
 
 /**
  * MeetingChat - AI chat panel for asking questions about the meeting
  */
-const MeetingChat = ({
-    meetingId,
-    onSendMessage,
-    isLoading = false,
-}) => {
+const MeetingChat = ({ onSendMessage }) => {
     const [messages, setMessages] = useState([]);
     const [input, setInput] = useState('');
     const [isProcessing, setIsProcessing] = useState(false);

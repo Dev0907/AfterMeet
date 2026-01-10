@@ -126,20 +126,20 @@ app.post('/api/analyze', async (req, res) => {
 app.post('/api/meetings/:meetingId/chat', async (req, res) => {
   log('AI', '/api/meetings/chat', 'Chat request', { meetingId: req.params.meetingId, question: req.body.question?.substring(0, 50) });
   try {
-    const response = await fetch(`${PYTHON_API_URL}/chat`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({
-        ...req.body,
-        meeting_id: req.params.meetingId
-      })
-    });
-    const data = await response.json();
-    log('AI', '/api/meetings/chat', 'Chat response received');
-    res.status(response.status).json(data);
+    const response = await axios.post(`${PYTHON_API_URL}/api/chat`, {
+      meeting_id: req.params.meetingId,
+      question: req.body.question
+    }, { timeout: 60000 });
+    
+    log('AI', '/api/meetings/chat', 'Chat response received', { answer: response.data.answer?.substring(0, 100) });
+    res.json(response.data);
   } catch (error) {
-    log('ERROR', '/api/meetings/chat', 'Python API error', { error: error.message });
-    res.status(503).json({ error: 'AI service unavailable. Make sure Python API is running.' });
+    log('ERROR', '/api/meetings/chat', 'Python API error', { error: error.message, response: error.response?.data });
+    if (error.response) {
+      res.status(error.response.status).json(error.response.data);
+    } else {
+      res.status(503).json({ error: 'AI service unavailable. Make sure Python API is running.' });
+    }
   }
 });
 

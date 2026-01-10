@@ -1,4 +1,4 @@
-import React, { useState, useEffect } from 'react';
+import { useState, useEffect } from 'react';
 import { useParams, Link } from 'react-router-dom';
 import NeoCard from '../components/ui/NeoCard';
 import NeoBadge from '../components/ui/NeoBadge';
@@ -20,8 +20,18 @@ const MeetingAnalytics = () => {
         try {
             const transcriptText = transcriptData.map(t => `${t.speaker}: ${t.text}`).join('\n');
             const { data: aiData } = await aiApi.analyze({ transcript: transcriptText, meeting_id: id });
-            setMeetingData(prev => ({ ...prev, summary: aiData.summary }));
             console.log('[Analytics] AI analysis complete:', aiData);
+            
+            const summaryData = {
+                ...aiData.summary,
+                topics: aiData.topics,
+                tasks: aiData.tasks,
+                speakers: aiData.speakers,
+                sentiment: aiData.sentiment,
+                overall_sentiment: aiData.overall_sentiment
+            };
+            setMeetingData(prev => ({ ...prev, summary: summaryData, topics: aiData.topics }));
+            
             if (aiData.transcript) {
                 setTranscript(aiData.transcript.map((t, i) => ({
                     id: i, speaker: t.speaker_name || t.speaker || 'Speaker',
@@ -147,35 +157,6 @@ const MeetingAnalytics = () => {
                     </NeoCard>
 
                     <NeoCard>
-                        <h2 className="flex items-center gap-2 text-xl font-black uppercase mb-4"><TrendingUp size={24} />Sentiment Analysis</h2>
-                        <div className="flex justify-center mb-6">
-                            <div className="relative w-48 h-48">
-                                <svg viewBox="0 0 100 100" className="w-full h-full -rotate-90">
-                                    {analytics?.sentimentData?.reduce((acc, item) => {
-                                        const colors = { positive: '#4ade80', neutral: '#A0C4FF', negative: '#FFB3C6' };
-                                        const offset = acc.offset;
-                                        acc.elements.push(<circle key={item.sentiment} cx="50" cy="50" r="40" fill="none" stroke={colors[item.sentiment]} strokeWidth="20" strokeDasharray={`${item.percentage} ${100 - item.percentage}`} strokeDashoffset={-offset} className="transition-all duration-500" />);
-                                        acc.offset += item.percentage;
-                                        return acc;
-                                    }, { elements: [], offset: 0 }).elements}
-                                </svg>
-                                <div className="absolute inset-0 flex items-center justify-center">
-                                    <div className="text-center"><p className="text-2xl font-black">{analytics?.sentimentData?.find(s => s.sentiment === 'positive')?.percentage || 0}%</p><p className="text-xs font-bold text-gray-600">POSITIVE</p></div>
-                                </div>
-                            </div>
-                        </div>
-                        <div className="flex justify-center gap-4">
-                            {analytics?.sentimentData?.map(item => (
-                                <div key={item.sentiment} className="flex items-center gap-2">
-                                    <div className={`w-4 h-4 border-2 border-black ${sentimentColors[item.sentiment]}`} />
-                                    <span className="text-sm font-bold capitalize">{item.sentiment}</span>
-                                    <span className="text-sm text-gray-600">({item.percentage}%)</span>
-                                </div>
-                            ))}
-                        </div>
-                    </NeoCard>
-
-                    <NeoCard>
                         <h2 className="flex items-center gap-2 text-xl font-black uppercase mb-4"><AlertCircle size={24} />Action Items by Urgency</h2>
                         <div className="grid grid-cols-2 gap-4">
                             {Object.entries(analytics?.urgencyCount || {}).map(([urgency, count]) => (
@@ -190,7 +171,7 @@ const MeetingAnalytics = () => {
                     <NeoCard className="lg:col-span-2">
                         <h2 className="flex items-center gap-2 text-xl font-black uppercase mb-4"><MessageSquare size={24} />Topics Discussed</h2>
                         <div className="flex flex-wrap gap-3 justify-center">
-                            {meetingData?.topics?.map((topic, index) => {
+                            {meetingData?.summary.topics?.map((topic, index) => {
                                 const sizes = ['text-lg', 'text-xl', 'text-2xl', 'text-3xl'];
                                 const colors = ['bg-neo-teal', 'bg-neo-yellow', 'bg-neo-red', 'bg-neo-dark', 'bg-green-200'];
                                 return <span key={topic} className={`${sizes[Math.floor(Math.random() * sizes.length)]} ${colors[index % colors.length]} font-bold px-4 py-2 border-4 border-black shadow-neo hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-neo-hover transition-all cursor-default`}>{topic}</span>;
