@@ -54,14 +54,20 @@ const TeamMeetings = () => {
     const [transcriptText, setTranscriptText] = useState('');
     const [meetingTitle, setMeetingTitle] = useState('');
 
-    // Schedule meeting modal
-    const [showScheduleModal, setShowScheduleModal] = useState(false);
-    const [scheduleData, setScheduleData] = useState({
+
+    // Date filter
+    const [dateFilter, setDateFilter] = useState('');
+
+    // Edit meeting modal
+    const [showEditModal, setShowEditModal] = useState(false);
+    const [editData, setEditData] = useState({
+        id: null,
         title: '',
         date: '',
         time: '',
         duration: '30',
-        platform: 'Zoom'
+        joinUrl: '',
+        autoJoinEnabled: false
     });
 
     // Team settings modal
@@ -124,38 +130,7 @@ const TeamMeetings = () => {
         fetchTeamData();
     }, [teamId]);
 
-    // Schedule a new meeting (Host only)
-    const handleScheduleMeeting = async (e) => {
-        e.preventDefault();
 
-        const userId = localStorage.getItem('userId');
-        const scheduledStart = new Date(`${scheduleData.date}T${scheduleData.time}`);
-
-        try {
-            const response = await fetch(`${API_BASE}/api/teams/${teamId}/meetings`, {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({
-                    title: scheduleData.title,
-                    userId,
-                    platform: scheduleData.platform,
-                    scheduledStart: scheduledStart.toISOString(),
-                    duration: parseInt(scheduleData.duration)
-                })
-            });
-
-            if (response.ok) {
-                const newMeeting = await response.json();
-                setMeetings(prev => [newMeeting, ...prev]);
-                setShowScheduleModal(false);
-                setScheduleData({ title: '', date: '', time: '', duration: '30', platform: 'Zoom' });
-                setUploadStatus({ type: 'success', message: 'Meeting scheduled!' });
-                setTimeout(() => setUploadStatus(null), 3000);
-            }
-        } catch (err) {
-            console.error('Error scheduling meeting:', err);
-        }
-    };
 
     const copyInviteLink = () => {
         const link = `${window.location.origin}/join/${inviteCode}`;
@@ -247,6 +222,120 @@ const TeamMeetings = () => {
             }
         } catch (err) {
             console.error('Error removing member:', err);
+        }
+    };
+
+
+
+    const handleDeleteMeeting = async (e, meetingId) => {
+        e.stopPropagation();
+        if (!window.confirm('Are you sure you want to delete this meeting? This action cannot be undone.')) {
+            return;
+        }
+
+        const userId = localStorage.getItem('userId');
+        try {
+            const response = await fetch(`${API_BASE}/api/meetings/${meetingId}?userId=${userId}`, {
+                method: 'DELETE'
+            });
+
+            if (response.ok) {
+                setMeetings(prev => prev.filter(m => m.id !== meetingId));
+                setUploadStatus({ type: 'success', message: 'Meeting deleted' });
+                setTimeout(() => setUploadStatus(null), 3000);
+            } else {
+                const data = await response.json();
+                setUploadStatus({ type: 'error', message: data.error });
+            }
+        } catch (err) {
+            console.error('Error deleting meeting:', err);
+        }
+    };
+
+    const openEditModal = (e, meeting) => {
+        e.stopPropagation();
+
+        // Parse date/time from scheduledStart or createdAt
+        const dateObj = meeting.scheduledStart ? new Date(meeting.scheduledStart) : new Date(meeting.createdAt);
+
+        // Format for input type="date" (YYYY-MM-DD)
+        const dateStr = dateObj.toISOString().split('T')[0];
+
+        // Format for input type="time" (HH:MM)
+        const timeStr = dateObj.toTimeString().slice(0, 5);
+
+        setEditData({
+            id: meeting.id,
+            title: meeting.title,
+            date: dateStr,
+            time: timeStr,
+            duration: meeting.duration || '30',
+            joinUrl: meeting.joinUrl || '',
+            autoJoinEnabled: meeting.autoJoinEnabled || false
+        });
+        setShowEditModal(true);
+    };
+
+    const handleUpdateMeeting = async (e) => {
+        e.preventDefault();
+
+        const userId = localStorage.getItem('userId');
+        const scheduledStart = new Date(`${editData.date}T${editData.time}`);
+
+        try {
+            // 1. Update Meeting in Backend DB
+            const response = await fetch(`${API_BASE}/api/meetings/${editData.id}`, {
+                method: 'PUT',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    title: editData.title,
+                    scheduledStart: scheduledStart.toISOString(),
+                    duration: parseInt(editData.duration),
+                    userId,
+                    joinUrl: editData.joinUrl,
+                    autoJoinEnabled: editData.autoJoinEnabled
+                })
+            });
+
+            if (response.ok) {
+                const updatedMeeting = await response.json();
+                setMeetings(prev => prev.map(m => m.id === updatedMeeting.id ? { ...m, ...updatedMeeting } : m));
+                setShowEditModal(false);
+
+                // 2. Trigger Auto-Joiner in Python if enabled
+                if (editData.autoJoinEnabled && editData.joinUrl) {
+                    try {
+                        // Call Backend Proxy or Python directly?
+                        // We should probably go through Node proxy, but let's assume we can add a proxy route or call direct if dev.
+                        // But wait, the Python API is distinct. Let's add a proxy in Server.js later or direct fetch here for now?
+                        // Better to use a proxy in server.js to avoid CORS if ports differ?
+                        // Actually, I'll add a 'schedule-join' proxy to server.js in NEXT step.
+                        // For now assuming the proxy will exist at /api/schedule-join
+                        await fetch(`${API_BASE}/api/schedule-join`, {
+                            method: 'POST',
+                            headers: { 'Content-Type': 'application/json' },
+                            body: JSON.stringify({
+                                link: editData.joinUrl,
+                                start_time: editData.time,
+                                end_time: new Date(scheduledStart.getTime() + (parseInt(editData.duration) * 60000)).toTimeString().slice(0, 5)
+                            })
+                        });
+                        setUploadStatus({ type: 'success', message: 'Meeting updated & Auto-Join Armed!' });
+                    } catch (pythonErr) {
+                        console.error("Failed to arm auto-joiner", pythonErr);
+                        setUploadStatus({ type: 'success', message: 'Meeting updated (Auto-join failed to arm)' });
+                    }
+                } else {
+                    setUploadStatus({ type: 'success', message: 'Meeting updated!' });
+                }
+                setTimeout(() => setUploadStatus(null), 3000);
+            } else {
+                const data = await response.json();
+                setUploadStatus({ type: 'error', message: data.error });
+            }
+        } catch (err) {
+            console.error('Error updating meeting:', err);
+            setUploadStatus({ type: 'error', message: 'Failed to update meeting' });
         }
     };
 
@@ -342,7 +431,7 @@ const TeamMeetings = () => {
                 body: JSON.stringify({
                     title: file.name.replace(/\.[^/.]+$/, ''),
                     userId,
-                    platform: 'Audio Upload'
+                    platform: 'Zoom'
                 })
             });
 
@@ -453,7 +542,7 @@ const TeamMeetings = () => {
     return (
         <div className="min-h-screen bg-neo-white">
             {/* Header */}
-            <header className="bg-neo-teal border-b-4 border-black">
+            <header className="bg-neo-blue border-b-4 border-black">
                 <div className="max-w-6xl mx-auto px-4 py-6">
                     <div className="flex flex-wrap items-center justify-between gap-4">
                         <div className="flex items-center gap-4">
@@ -486,13 +575,7 @@ const TeamMeetings = () => {
                                         <Link2 size={18} className="mr-2" />
                                         Invite
                                     </NeoButton>
-                                    <NeoButton
-                                        onClick={() => setShowScheduleModal(true)}
-                                        className="bg-neo-yellow"
-                                    >
-                                        <Video size={18} className="mr-2" />
-                                        Schedule
-                                    </NeoButton>
+
                                     <NeoButton
                                         onClick={openSettings}
                                         className="bg-white"
@@ -501,6 +584,29 @@ const TeamMeetings = () => {
                                         Settings
                                     </NeoButton>
                                 </>
+                            )}
+
+                        </div>
+                    </div>
+
+                    {/* Filters & Tools */}
+                    <div className="mt-6 pt-6 border-t-2 border-black/20 flex flex-wrap items-center gap-4">
+                        <div className="flex items-center gap-2">
+                            <span className="font-bold uppercase text-sm">Filter by Date:</span>
+                            <input
+                                type="date"
+                                value={dateFilter}
+                                onChange={(e) => setDateFilter(e.target.value)}
+                                className="p-2 border-2 border-black font-medium text-sm focus:bg-neo-white outline-none"
+                            />
+                            {dateFilter && (
+                                <button
+                                    onClick={() => setDateFilter('')}
+                                    className="p-2 bg-neo-red border-2 border-black hover:bg-red-400 font-bold"
+                                    title="Clear Filter"
+                                >
+                                    <X size={16} />
+                                </button>
                             )}
                         </div>
                     </div>
@@ -569,41 +675,28 @@ const TeamMeetings = () => {
                         <NeoSkeletonCard />
                         <NeoSkeletonCard />
                     </div>
-                ) : meetings.length === 0 ? (
-                    <NeoCard className="text-center py-12">
-                        <FileAudio size={64} className="mx-auto mb-4 text-gray-400" />
-                        <h2 className="text-2xl font-black uppercase mb-2">No Meetings Yet</h2>
-                        <p className="font-medium text-gray-600 mb-6">
-                            Upload a recording or paste a transcript to get started
-                        </p>
-                        <div className="flex justify-center gap-3">
-                            <NeoButton
-                                onClick={() => setShowTranscriptModal(true)}
-                                className="bg-neo-yellow"
-                            >
-                                <FileText size={18} className="mr-2" />
-                                Paste Transcript
-                            </NeoButton>
-                            <NeoButton
-                                onClick={() => fileInputRef.current?.click()}
-                                className="bg-neo-teal"
-                            >
-                                <Upload size={18} className="mr-2" />
-                                Upload File
-                            </NeoButton>
-                        </div>
-                    </NeoCard>
                 ) : (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">
-                        {meetings.map((meeting) => (
-                            <button
+                        {meetings.filter(m => {
+                            if (!dateFilter) return true;
+                            const meetingDate = new Date(m.createdAt).toISOString().split('T')[0];
+                            return meetingDate === dateFilter;
+                        }).map((meeting) => (
+                            <div
                                 key={meeting.id}
                                 onClick={() => navigate(`/teams/${teamId}/meetings/${meeting.id}`)}
+                                role="button"
+                                tabIndex={0}
+                                onKeyDown={(e) => {
+                                    if (e.key === 'Enter' || e.key === ' ') {
+                                        navigate(`/teams/${teamId}/meetings/${meeting.id}`);
+                                    }
+                                }}
                                 className="
                                     text-left bg-white border-4 border-black shadow-neo p-5
                                     hover:translate-x-1 hover:translate-y-1 hover:shadow-neo-hover
                                     active:translate-x-2 active:translate-y-2 active:shadow-none
-                                    transition-all group
+                                    transition-all group cursor-pointer
                                 "
                             >
                                 <div className="flex items-start justify-between mb-3">
@@ -629,11 +722,31 @@ const TeamMeetings = () => {
                                     )}
                                 </div>
 
-                                <div className="mt-4 flex items-center justify-end text-sm font-bold text-gray-500 group-hover:text-black transition-colors">
-                                    View Details
-                                    <ChevronRight size={16} className="ml-1 group-hover:translate-x-1 transition-transform" />
+                                <div className="mt-4 flex items-center justify-between">
+                                    {userRole === 'owner' && (
+                                        <div className="flex gap-2">
+                                            <button
+                                                onClick={(e) => openEditModal(e, meeting)}
+                                                className="p-2 text-gray-500 hover:text-neo-dark hover:bg-neo-white border-2 border-transparent hover:border-black transition-all"
+                                                title="Edit Meeting"
+                                            >
+                                                <Edit3 size={16} />
+                                            </button>
+                                            <button
+                                                onClick={(e) => handleDeleteMeeting(e, meeting.id)}
+                                                className="p-2 text-gray-500 hover:text-neo-red hover:bg-neo-white border-2 border-transparent hover:border-neo-red transition-all"
+                                                title="Delete Meeting"
+                                            >
+                                                <Trash2 size={16} />
+                                            </button>
+                                        </div>
+                                    )}
+                                    <div className="flex items-center text-sm font-bold text-gray-500 group-hover:text-black transition-colors ml-auto">
+                                        View Details
+                                        <ChevronRight size={16} className="ml-1 group-hover:translate-x-1 transition-transform" />
+                                    </div>
                                 </div>
-                            </button>
+                            </div>
                         ))}
                     </div>
                 )}
@@ -697,26 +810,28 @@ const TeamMeetings = () => {
             )}
 
             {/* Schedule Meeting Modal (Host Only) */}
-            {showScheduleModal && (
+
+
+            {/* Edit Meeting Modal */}
+            {showEditModal && (
                 <div className="fixed inset-0 bg-black/50 flex items-center justify-center p-4 z-50">
                     <NeoCard className="w-full max-w-md relative">
                         <button
-                            onClick={() => setShowScheduleModal(false)}
+                            onClick={() => setShowEditModal(false)}
                             className="absolute top-4 right-4 p-1 border-2 border-black hover:bg-neo-red transition-colors"
                         >
                             <X size={20} />
                         </button>
 
-                        <h2 className="text-2xl font-black uppercase mb-4">Schedule Meeting</h2>
+                        <h2 className="text-2xl font-black uppercase mb-4">Edit Meeting</h2>
 
-                        <form onSubmit={handleScheduleMeeting} className="space-y-4">
+                        <form onSubmit={handleUpdateMeeting} className="space-y-4">
                             <div>
                                 <label className="block font-bold text-sm uppercase mb-1">Title</label>
                                 <input
                                     type="text"
-                                    value={scheduleData.title}
-                                    onChange={(e) => setScheduleData({ ...scheduleData, title: e.target.value })}
-                                    placeholder="Weekly Standup"
+                                    value={editData.title}
+                                    onChange={(e) => setEditData({ ...editData, title: e.target.value })}
                                     className="w-full p-3 border-4 border-black font-medium focus:bg-neo-white outline-none"
                                     required
                                 />
@@ -727,8 +842,8 @@ const TeamMeetings = () => {
                                     <label className="block font-bold text-sm uppercase mb-1">Date</label>
                                     <input
                                         type="date"
-                                        value={scheduleData.date}
-                                        onChange={(e) => setScheduleData({ ...scheduleData, date: e.target.value })}
+                                        value={editData.date}
+                                        onChange={(e) => setEditData({ ...editData, date: e.target.value })}
                                         className="w-full p-3 border-4 border-black font-medium focus:bg-neo-white outline-none"
                                         required
                                     />
@@ -737,48 +852,60 @@ const TeamMeetings = () => {
                                     <label className="block font-bold text-sm uppercase mb-1">Time</label>
                                     <input
                                         type="time"
-                                        value={scheduleData.time}
-                                        onChange={(e) => setScheduleData({ ...scheduleData, time: e.target.value })}
+                                        value={editData.time}
+                                        onChange={(e) => setEditData({ ...editData, time: e.target.value })}
                                         className="w-full p-3 border-4 border-black font-medium focus:bg-neo-white outline-none"
                                         required
                                     />
                                 </div>
                             </div>
 
-                            <div className="grid grid-cols-2 gap-3">
-                                <div>
-                                    <label className="block font-bold text-sm uppercase mb-1">Duration</label>
-                                    <select
-                                        value={scheduleData.duration}
-                                        onChange={(e) => setScheduleData({ ...scheduleData, duration: e.target.value })}
-                                        className="w-full p-3 border-4 border-black font-medium focus:bg-neo-white outline-none"
-                                    >
-                                        <option value="15">15 min</option>
-                                        <option value="30">30 min</option>
-                                        <option value="45">45 min</option>
-                                        <option value="60">1 hour</option>
-                                        <option value="90">1.5 hours</option>
-                                        <option value="120">2 hours</option>
-                                    </select>
-                                </div>
-                                <div>
-                                    <label className="block font-bold text-sm uppercase mb-1">Platform</label>
-                                    <select
-                                        value={scheduleData.platform}
-                                        onChange={(e) => setScheduleData({ ...scheduleData, platform: e.target.value })}
-                                        className="w-full p-3 border-4 border-black font-medium focus:bg-neo-white outline-none"
-                                    >
-                                        <option value="Zoom">Zoom</option>
-                                        <option value="Google Meet">Google Meet</option>
-                                        <option value="Teams">Microsoft Teams</option>
-                                        <option value="Offline">In-Person</option>
-                                    </select>
-                                </div>
+                            <div>
+                                <label className="block font-bold text-sm uppercase mb-1">Duration (min)</label>
+                                <select
+                                    value={editData.duration}
+                                    onChange={(e) => setEditData({ ...editData, duration: e.target.value })}
+                                    className="w-full p-3 border-4 border-black font-medium focus:bg-neo-white outline-none"
+                                >
+                                    <option value="15">15 min</option>
+                                    <option value="30">30 min</option>
+                                    <option value="45">45 min</option>
+                                    <option value="60">1 hour</option>
+                                    <option value="90">1.5 hours</option>
+                                    <option value="120">2 hours</option>
+                                </select>
+                            </div>
+
+                            <div>
+                                <label className="block font-bold text-sm uppercase mb-1">Meeting Link (Teams/Zoom)</label>
+                                <input
+                                    type="url"
+                                    value={editData.joinUrl}
+                                    onChange={(e) => setEditData({ ...editData, joinUrl: e.target.value })}
+                                    placeholder="https://teams.microsoft.com/..."
+                                    className="w-full p-3 border-4 border-black font-medium focus:bg-neo-white outline-none"
+                                />
+                            </div>
+
+                            <div className="flex items-center gap-3 p-3 border-4 border-black bg-neo-white">
+                                <input
+                                    type="checkbox"
+                                    id="autoJoin"
+                                    checked={editData.autoJoinEnabled}
+                                    onChange={(e) => setEditData({ ...editData, autoJoinEnabled: e.target.checked })}
+                                    className="w-5 h-5 accent-neo-teal"
+                                />
+                                <label htmlFor="autoJoin" className="font-bold text-sm cursor-pointer select-none">
+                                    AUTO-JOIN MEETING
+                                    <span className="block text-xs font-normal text-gray-600">
+                                        Bot will automatically open link at start time and join.
+                                    </span>
+                                </label>
                             </div>
 
                             <NeoButton type="submit" className="w-full bg-neo-yellow mt-4">
-                                <Calendar size={18} className="mr-2" />
-                                Schedule Meeting
+                                <check-circle size={18} className="mr-2" />
+                                Save Changes
                             </NeoButton>
                         </form>
                     </NeoCard>
@@ -929,7 +1056,7 @@ const TeamMeetings = () => {
             )}
 
             {/* Footer */}
-            <footer className="mt-12 border-t-4 border-black bg-neo-teal py-6">
+            <footer className="mt-12 border-t-4 border-black bg-neo-blue py-6">
                 <div className="max-w-6xl mx-auto px-4 text-center">
                     <p className="font-bold text-sm">
                         AfterMeet • Meeting Intelligence Platform

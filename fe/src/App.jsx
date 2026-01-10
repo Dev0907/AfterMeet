@@ -8,13 +8,14 @@ import TeamMeetings from './pages/TeamMeetings';
 import MeetingDetail from './pages/MeetingDetail';
 import MeetingAnalytics from './pages/MeetingAnalytics';
 import JoinTeam from './pages/JoinTeam';
+import LandingPage from './pages/LandingPage';
 
 import ProtectedRoute from './components/ProtectedRoute';
 
-// Smart redirect: if logged in, go to teams; otherwise signin
+// Smart redirect: if logged in, go to teams; otherwise show landing
 const HomeRedirect = () => {
   const isLoggedIn = localStorage.getItem('userId');
-  return <Navigate to={isLoggedIn ? '/teams' : '/signin'} replace />;
+  return isLoggedIn ? <Navigate to="/teams" replace /> : <LandingPage />;
 };
 
 function App() {
@@ -29,7 +30,7 @@ function App() {
         <Route path="/join" element={<JoinTeam />} />
         <Route path="/join/:inviteCode" element={<JoinTeam />} />
 
-        {/* Teams-based navigation */}
+        {/* Teams-based navigation (Main App) */}
         <Route path="/teams" element={
           <ProtectedRoute>
             <TeamsList />
@@ -51,8 +52,9 @@ function App() {
           </ProtectedRoute>
         } />
 
-        {/* Legacy routes redirect to teams */}
-        <Route path="/landing" element={<Navigate to="/teams" replace />} />
+        {/* Legacy/Redirects */}
+        <Route path="/landing" element={<Navigate to="/" replace />} />
+        <Route path="/dashboard" element={<Navigate to="/teams" replace />} />
         <Route path="/meetings" element={<Navigate to="/teams" replace />} />
         <Route path="/meetings/:meetingId" element={<Navigate to="/teams" replace />} />
       </Routes>

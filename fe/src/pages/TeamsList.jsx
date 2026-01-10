@@ -155,7 +155,7 @@ const TeamsList = () => {
     };
 
     return (
-        <div className="min-h-screen bg-neo-white">
+        <div className="min-h-screen bg-neo-white flex flex-col">
             {/* Header */}
             <header className="bg-neo-yellow border-b-4 border-black">
                 <div className="max-w-6xl mx-auto px-4 py-6">
@@ -194,7 +194,7 @@ const TeamsList = () => {
                 </div>
             </header>
 
-            <main className="max-w-6xl mx-auto px-4 py-8">
+            <main className="max-w-6xl mx-auto px-4 py-8 w-full flex-grow">
                 {/* Teams Grid */}
                 {isLoading ? (
                     <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 gap-4">

@@ -9,15 +9,147 @@ const app = express();
 const prisma = new PrismaClient();
 const PORT = process.env.PORT || 3000;
 
+// Python AI API URL
+const PYTHON_API_URL = process.env.PYTHON_API_URL || 'http://127.0.0.1:5001';
+
 // OTP expiry time in minutes
 const OTP_EXPIRY_MINUTES = 10;
 
 app.use(cors());
-app.use(express.json());
+app.use(express.json({ limit: '10mb' })); // Increase limit for transcripts
 
 // Basic health check
 app.get('/health', (req, res) => {
   res.json({ status: 'ok', message: 'Server is running in Neobrutalist mode' });
+});
+
+// ============================================
+// Python AI API Proxy Routes
+// ============================================
+
+// Analyze transcript
+app.post('/api/analyze', async (req, res) => {
+  try {
+    const response = await fetch(`${PYTHON_API_URL}/analyze`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req.body)
+    });
+    const data = await response.json();
+
+    // Save summary to database
+    if (data.summary && data.meeting_id) {
+      // Find DB meeting ID if different from Python ID (assuming they match for now)
+      // If Python generates a new ID but we have an existing one, user passed meeting_id in body
+      const meetingId = req.body.meeting_id;
+
+      if (meetingId) {
+        // 1. Save Full Analysis Package as Summary
+        const analysisPackage = {
+          ...data.summary, // detailed text, duration, etc
+          sentiment: data.sentiment,
+          speakers: data.speakers,
+          tasks: data.tasks,
+          topics: data.topics,
+          overall_sentiment: data.overall_sentiment
+        };
+
+        await prisma.meetingSummary.upsert({
+          where: { meetingId },
+          update: { summary: JSON.stringify(analysisPackage) },
+          create: { meetingId, summary: JSON.stringify(analysisPackage) }
+        });
+
+        // 2. Update Transcript Sentiment (Sync Python results to DB)
+        if (data.transcript && Array.isArray(data.transcript)) {
+          // We need to match Python transcript entries back to DB records.
+          // Since we can't easily match by ID (Python doesn't know DB IDs unless we sent them),
+          // we'll update based on startTime/text match, OR simpler: delete and recreate?
+          // Recreating is risky if we lose other metadata.
+          // Better approach: We assume the order is preserved or we fetch headers.
+
+          // Let's try to update matching records by text snippet or just bulk replace for this MVP.
+          // Bulk replace is safer to ensure sync.
+
+          // Delete old transcripts for this meeting
+          await prisma.meetingTranscript.deleteMany({
+            where: { meetingId }
+          });
+
+          // Insert new transcripts with sentiment
+          await prisma.meetingTranscript.createMany({
+            data: data.transcript.map((t, index) => ({
+              meetingId,
+              speaker: t.speaker_name || t.speaker || 'Unknown',
+              text: t.text,
+              sentiment: t.sentiment, // The missing piece!
+              startTime: t.timestamp ? parseTimestamp(t.timestamp) : index * 10,
+              endTime: (t.timestamp ? parseTimestamp(t.timestamp) : index * 10) + 10
+            }))
+          });
+        }
+      }
+    }
+
+    res.status(response.status).json(data);
+  } catch (error) {
+    console.error('Python API error:', error);
+    res.status(503).json({ error: 'AI service unavailable. Make sure Python API is running.' });
+  }
+});
+
+// Chat with meeting
+app.post('/api/meetings/:meetingId/chat', async (req, res) => {
+  try {
+    const response = await fetch(`${PYTHON_API_URL}/chat`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...req.body,
+        meeting_id: req.params.meetingId
+      })
+    });
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (error) {
+    console.error('Python API error:', error);
+    res.status(503).json({ error: 'AI service unavailable. Make sure Python API is running.' });
+  }
+});
+
+// Semantic search
+app.post('/api/meetings/:meetingId/search', async (req, res) => {
+  try {
+    const response = await fetch(`${PYTHON_API_URL}/search`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({
+        ...req.body,
+        meeting_id: req.params.meetingId
+      })
+    });
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (error) {
+    console.error('Python API error:', error);
+    res.status(503).json({ error: 'AI service unavailable. Make sure Python API is running.' });
+  }
+});
+
+// Schedule Auto-Join
+app.post('/api/schedule-join', async (req, res) => {
+  try {
+    const response = await fetch(`${PYTHON_API_URL}/schedule-join`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(req.body)
+    });
+    const data = await response.json();
+    res.status(response.status).json(data);
+  } catch (error) {
+    console.error('Python API error:', error);
+    res.status(503).json({ error: 'AI service unavailable. Make sure Python API is running.' });
+  }
 });
 
 // ============================================
@@ -726,6 +858,16 @@ app.get('/api/meetings/:meetingId', async (req, res) => {
       return res.status(404).json({ error: 'Meeting not found' });
     }
 
+    // Parse summary JSON if it exists as string
+    let parsedSummary = null;
+    if (meeting.summary && meeting.summary.summary) {
+      try {
+        parsedSummary = JSON.parse(meeting.summary.summary);
+      } catch (e) {
+        parsedSummary = { text: meeting.summary.summary };
+      }
+    }
+
     res.json({
       id: meeting.id,
       title: meeting.title,
@@ -744,13 +886,94 @@ app.get('/api/meetings/:meetingId', async (req, res) => {
         startTime: t.startTime,
         endTime: t.endTime
       })),
-      summary: meeting.summary,
+      summary: parsedSummary || meeting.summary, // Return parsed object or original
       hasTranscript: meeting.transcripts.length > 0,
       hasSummary: !!meeting.summary
     });
   } catch (error) {
     console.error('Get meeting error:', error);
     res.status(500).json({ error: 'Failed to fetch meeting' });
+  }
+});
+
+// Update meeting details
+app.put('/api/meetings/:meetingId', async (req, res) => {
+  const { meetingId } = req.params;
+  const { title, scheduledStart, duration, userId, joinUrl, autoJoinEnabled } = req.body;
+
+  if (!userId) {
+    return res.status(400).json({ error: 'User ID required' });
+  }
+
+  try {
+    const meeting = await prisma.meeting.findUnique({
+      where: { id: meetingId },
+      include: { team: { include: { members: true } } }
+    });
+
+    if (!meeting) return res.status(404).json({ error: 'Meeting not found' });
+
+    // Check permission: Organizer OR Team Owner
+    const isOrganizer = meeting.organizerId === userId;
+    const isTeamOwner = meeting.team?.members.some(m => m.userId === userId && m.role === 'owner');
+
+    if (!isOrganizer && !isTeamOwner) {
+      return res.status(403).json({ error: 'Not authorized to edit this meeting' });
+    }
+
+    const start = new Date(scheduledStart);
+    const end = new Date(start.getTime() + (duration * 60000));
+
+    const updated = await prisma.meeting.update({
+      where: { id: meetingId },
+      data: {
+        title,
+        scheduledStart: start,
+        scheduledEnd: end,
+        joinUrl,
+        autoJoinEnabled
+      }
+    });
+
+    res.json(updated);
+  } catch (error) {
+    console.error('Update meeting error:', error);
+    res.status(500).json({ error: 'Failed to update meeting' });
+  }
+});
+
+// Delete meeting
+app.delete('/api/meetings/:meetingId', async (req, res) => {
+  const { meetingId } = req.params;
+  const { userId } = req.query;
+
+  if (!userId) return res.status(400).json({ error: 'User ID required' });
+
+  try {
+    const meeting = await prisma.meeting.findUnique({
+      where: { id: meetingId },
+      include: { team: { include: { members: true } } }
+    });
+
+    if (!meeting) return res.status(404).json({ error: 'Meeting not found' });
+
+    // Check permission: Organizer OR Team Owner
+    const isOrganizer = meeting.organizerId === userId;
+    const isTeamOwner = meeting.team?.members.some(m => m.userId === userId && m.role === 'owner');
+
+    if (!isOrganizer && !isTeamOwner) {
+      return res.status(403).json({ error: 'Not authorized to delete this meeting' });
+    }
+
+    // Since we enabled cascade delete in schema, deleting meeting deletes all related data
+    await prisma.meeting.delete({
+      where: { id: meetingId }
+    });
+
+    res.json({ message: 'Meeting deleted successfully' });
+  } catch (error) {
+    console.error('Delete meeting error:', error);
+    res.status(500).json({ error: 'Failed to delete meeting' });
   }
 });
 
@@ -791,6 +1014,50 @@ app.post('/api/meetings/:meetingId/transcript', async (req, res) => {
   } catch (error) {
     console.error('Upload transcript error:', error);
     res.status(500).json({ error: 'Failed to upload transcript' });
+  }
+});
+
+// Delete a meeting (with all transcripts and summary)
+app.delete('/api/meetings/:meetingId', async (req, res) => {
+  const { meetingId } = req.params;
+  const { userId } = req.query;
+
+  const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+  if (!uuidRegex.test(meetingId)) {
+    return res.status(400).json({ error: 'Invalid meeting ID' });
+  }
+
+  try {
+    // Get meeting to check ownership
+    const meeting = await prisma.meeting.findUnique({
+      where: { id: meetingId },
+      include: { team: { include: { members: true } } }
+    });
+
+    if (!meeting) {
+      return res.status(404).json({ error: 'Meeting not found' });
+    }
+
+    // Check if user is organizer or team owner
+    const isOrganizer = meeting.organizerId === userId;
+    const isTeamOwner = meeting.team?.members.some(m => m.userId === userId && m.role === 'owner');
+
+    if (!isOrganizer && !isTeamOwner) {
+      return res.status(403).json({ error: 'Only the organizer or team owner can delete this meeting' });
+    }
+
+    // Delete in order (due to foreign keys)
+    await prisma.meetingTranscript.deleteMany({ where: { meetingId } });
+    await prisma.meetingSummary.deleteMany({ where: { meetingId } });
+    await prisma.task.deleteMany({ where: { meetingId } });
+    await prisma.meetingParticipant.deleteMany({ where: { meetingId } });
+    await prisma.meetingAudio.deleteMany({ where: { meetingId } });
+    await prisma.meeting.delete({ where: { id: meetingId } });
+
+    res.json({ message: 'Meeting deleted successfully' });
+  } catch (error) {
+    console.error('Delete meeting error:', error);
+    res.status(500).json({ error: 'Failed to delete meeting' });
   }
 });
 

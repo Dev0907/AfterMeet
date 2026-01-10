@@ -15,7 +15,8 @@ import {
     CheckCircle,
     Loader2,
 } from 'lucide-react';
-import { MOCK_MEETING_SUMMARY, MOCK_TRANSCRIPT, simulateApiDelay } from '../services/meetingApi';
+
+const API_BASE = 'http://localhost:3000';
 
 /**
  * MeetingAnalytics - Graphical representation of meeting data
@@ -25,60 +26,162 @@ const MeetingAnalytics = () => {
     const [meetingData, setMeetingData] = useState(null);
     const [transcript, setTranscript] = useState([]);
     const [isLoading, setIsLoading] = useState(true);
+    const [error, setError] = useState(null);
+    const [isAnalyzing, setIsAnalyzing] = useState(false);
+
+    const triggerAnalysis = async (transcriptData, id) => {
+        if (isAnalyzing) return;
+        setIsAnalyzing(true);
+        console.log('Auto-triggering AI analysis...');
+
+        try {
+            const transcriptText = transcriptData.map(t => `${t.speaker}: ${t.text}`).join('\n');
+            const response = await fetch(`${API_BASE}/api/analyze`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    transcript: transcriptText,
+                    meeting_id: id
+                })
+            });
+
+            if (response.ok) {
+                const aiData = await response.json();
+
+                // Update local state with new analysis
+                setMeetingData(prev => ({
+                    ...prev,
+                    summary: aiData.summary
+                }));
+
+                // If backend returns updated transcript with sentiment
+                if (aiData.transcript) {
+                    setTranscript(aiData.transcript.map((t, i) => ({
+                        id: i,
+                        speaker: t.speaker_name || t.speaker || 'Speaker',
+                        text: t.text,
+                        timestamp: t.timestamp || '--:--',
+                        sentiment: t.sentiment || 'neutral'
+                    })));
+                }
+            }
+        } catch (err) {
+            console.error('Auto-analysis failed:', err);
+        } finally {
+            setIsAnalyzing(false);
+        }
+    };
 
     useEffect(() => {
         const fetchData = async () => {
             setIsLoading(true);
-            await simulateApiDelay(null, 600);
-            setMeetingData(MOCK_MEETING_SUMMARY);
-            setTranscript(MOCK_TRANSCRIPT);
-            setIsLoading(false);
+            setError(null);
+
+            try {
+                const response = await fetch(`${API_BASE}/api/meetings/${meetingId}`);
+
+                if (response.ok) {
+                    const data = await response.json();
+                    setMeetingData(data);
+                    setTranscript(data.transcript || []);
+
+                    // Auto-trigger analysis if transcript exists but summary OR sentiment is missing
+                    // This ensures "sentiments apis are hit every time" even if we can't persist sentiment easily
+                    const hasSentiment = data.transcript?.[0]?.sentiment !== undefined;
+
+                    if (data.transcript?.length > 0 && (!data.summary || !data.summary.action_items || !hasSentiment)) {
+                        triggerAnalysis(data.transcript, meetingId);
+                    }
+                } else {
+                    setError('Meeting not found');
+                }
+            } catch (err) {
+                console.error('Error fetching meeting:', err);
+                setError('Failed to load analytics');
+            } finally {
+                setIsLoading(false);
+            }
         };
         fetchData();
     }, [meetingId]);
 
-    // Calculate analytics data
+    // Calculate analytics data from real data
+    // Calculate analytics data from real data
     const getAnalytics = () => {
-        if (!meetingData || !transcript.length) return null;
+        if (!meetingData) return null;
 
-        // Speaker participation
-        const speakerCounts = {};
-        transcript.forEach(entry => {
-            speakerCounts[entry.speaker] = (speakerCounts[entry.speaker] || 0) + 1;
-        });
-        const totalMessages = transcript.length;
-        const speakerData = Object.entries(speakerCounts).map(([name, count]) => ({
-            name,
-            count,
-            percentage: Math.round((count / totalMessages) * 100),
-        })).sort((a, b) => b.count - a.count);
+        // 1. Speaker Data (Prefer backend data)
+        let speakerData = [];
+        if (meetingData.summary?.speakers) {
+            // New API format
+            speakerData = Object.entries(meetingData.summary.speakers).map(([name, stats]) => ({
+                name,
+                count: stats.segments,
+                percentage: 0, // calc below
+                duration: stats.duration
+            }));
+            const totalSegments = speakerData.reduce((acc, s) => acc + s.count, 0);
+            speakerData = speakerData.map(s => ({
+                ...s,
+                percentage: totalSegments ? Math.round((s.count / totalSegments) * 100) : 0
+            })).sort((a, b) => b.count - a.count);
+        } else if (transcript.length) {
+            // Client-side fallback
+            const speakerCounts = {};
+            transcript.forEach(entry => {
+                const speaker = entry.speaker || 'Unknown';
+                speakerCounts[speaker] = (speakerCounts[speaker] || 0) + 1;
+            });
+            const totalMessages = transcript.length;
+            speakerData = Object.entries(speakerCounts).map(([name, count]) => ({
+                name,
+                count,
+                percentage: Math.round((count / totalMessages) * 100),
+            })).sort((a, b) => b.count - a.count);
+        }
 
-        // Sentiment breakdown
-        const sentimentCounts = { positive: 0, neutral: 0, negative: 0 };
-        transcript.forEach(entry => {
-            sentimentCounts[entry.sentiment || 'neutral']++;
-        });
-        const sentimentData = Object.entries(sentimentCounts).map(([sentiment, count]) => ({
-            sentiment,
-            count,
-            percentage: Math.round((count / totalMessages) * 100),
-        }));
+        // 2. Sentiment Data (Prefer backend data)
+        let sentimentData = [];
+        if (meetingData.summary?.overall_sentiment && transcript.length) {
+            // If we have overall but manual distribution needed for chart
+            // New API returns avg sentiment per speaker, but for pie chart we need counts.
+            // We can use the transcript sentiment which we synced to DB.
+            const sentimentCounts = { positive: 0, neutral: 0, negative: 0 };
+            transcript.forEach(entry => {
+                sentimentCounts[entry.sentiment || 'neutral']++;
+            });
+            const total = transcript.length;
+            sentimentData = Object.entries(sentimentCounts).map(([sentiment, count]) => ({
+                sentiment,
+                count,
+                percentage: total ? Math.round((count / total) * 100) : 0,
+            }));
+        } else if (transcript.length) {
+            const sentimentCounts = { positive: 0, neutral: 0, negative: 0 };
+            transcript.forEach(entry => {
+                sentimentCounts[entry.sentiment || 'neutral']++;
+            });
+            const total = transcript.length;
+            sentimentData = Object.entries(sentimentCounts).map(([sentiment, count]) => ({
+                sentiment,
+                count,
+                percentage: total ? Math.round((count / total) * 100) : 0,
+            }));
+        }
 
-        // Action items by urgency
+        // 3. Action Items
         const urgencyCount = { critical: 0, high: 0, medium: 0, low: 0 };
-        meetingData.actionItems?.forEach(item => {
-            urgencyCount[item.urgency]++;
+        const actionItems = meetingData.summary?.tasks || meetingData.summary?.action_items || [];
+        actionItems.forEach(item => {
+            const urgency = (item.urgency || 'medium').toLowerCase();
+            if (urgencyCount[urgency] !== undefined) {
+                urgencyCount[urgency]++;
+            } else {
+                urgencyCount['medium']++;
+            }
         });
 
-        // Timeline data (mock)
-        const timelineData = [
-            { time: '0-10 min', sentiment: 'neutral', topics: 2 },
-            { time: '10-20 min', sentiment: 'positive', topics: 3 },
-            { time: '20-30 min', sentiment: 'neutral', topics: 2 },
-            { time: '30-45 min', sentiment: 'positive', topics: 1 },
-        ];
-
-        return { speakerData, sentimentData, urgencyCount, timelineData };
+        return { speakerData, sentimentData, urgencyCount, actionItems };
     };
 
     const analytics = getAnalytics();
@@ -95,6 +198,25 @@ const MeetingAnalytics = () => {
                     <Loader2 size={48} className="animate-spin mx-auto mb-4" />
                     <p className="font-bold">Loading analytics...</p>
                 </div>
+            </div>
+        );
+    }
+
+    if (error || !meetingData) {
+        return (
+            <div className="min-h-screen bg-neo-white flex items-center justify-center">
+                <NeoCard className="text-center max-w-md">
+                    <AlertCircle size={48} className="mx-auto mb-4 text-neo-red" />
+                    <h2 className="text-2xl font-black uppercase mb-2">No Data Available</h2>
+                    <p className="text-gray-600 mb-4">{error || 'Meeting data not found.'}</p>
+                    <Link
+                        to={`/teams/${teamId}/meetings`}
+                        className="inline-flex items-center gap-2 px-4 py-2 bg-neo-yellow border-4 border-black font-bold"
+                    >
+                        <ArrowLeft size={18} />
+                        Back to Meetings
+                    </Link>
+                </NeoCard>
             </div>
         );
     }
@@ -129,8 +251,8 @@ const MeetingAnalytics = () => {
                 <div className="grid grid-cols-2 md:grid-cols-4 gap-4 mb-8">
                     <NeoCard className="text-center">
                         <Users size={32} className="mx-auto mb-2 text-neo-dark" />
-                        <p className="text-3xl font-black">{meetingData?.participants?.length || 0}</p>
-                        <p className="text-sm font-bold text-gray-600 uppercase">Participants</p>
+                        <p className="text-3xl font-black">{analytics?.speakerData?.length || 0}</p>
+                        <p className="text-sm font-bold text-gray-600 uppercase">Speakers</p>
                     </NeoCard>
                     <NeoCard className="text-center">
                         <MessageSquare size={32} className="mx-auto mb-2 text-neo-teal" />
@@ -139,12 +261,12 @@ const MeetingAnalytics = () => {
                     </NeoCard>
                     <NeoCard className="text-center">
                         <AlertCircle size={32} className="mx-auto mb-2 text-neo-red" />
-                        <p className="text-3xl font-black">{meetingData?.actionItems?.length || 0}</p>
+                        <p className="text-3xl font-black">{analytics?.actionItems?.length || 0}</p>
                         <p className="text-sm font-bold text-gray-600 uppercase">Action Items</p>
                     </NeoCard>
                     <NeoCard className="text-center">
                         <Clock size={32} className="mx-auto mb-2 text-neo-yellow" />
-                        <p className="text-3xl font-black">{meetingData?.duration || '45 min'}</p>
+                        <p className="text-3xl font-black">{meetingData?.duration || '-'}</p>
                         <p className="text-sm font-bold text-gray-600 uppercase">Duration</p>
                     </NeoCard>
                 </div>
@@ -332,7 +454,7 @@ const MeetingAnalytics = () => {
                             </div>
                             <div className="bg-white border-4 border-black p-4">
                                 <p className="font-black uppercase text-sm text-gray-600 mb-2">Overall Sentiment</p>
-                                <p className="text-xl font-black capitalize">{meetingData?.sentiment || 'Neutral'}</p>
+                                <p className="text-xl font-black capitalize">{meetingData?.summary?.overall_sentiment || meetingData?.sentiment || 'Neutral'}</p>
                                 <p className="text-sm font-medium text-gray-600">
                                     Based on {transcript.length} messages
                                 </p>
