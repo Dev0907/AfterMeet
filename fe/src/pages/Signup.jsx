@@ -3,8 +3,9 @@ import React, { useState } from 'react';
 import NeoButton from '../components/ui/NeoButton';
 import NeoInput from '../components/ui/NeoInput';
 import NeoCard from '../components/ui/NeoCard';
+import OtpVerification from '../components/ui/OtpVerification';
 import { Link, useNavigate } from 'react-router-dom';
-import { ArrowLeft } from 'lucide-react';
+import { ArrowLeft, Loader2 } from 'lucide-react';
 
 const Signup = () => {
     const navigate = useNavigate();
@@ -12,10 +13,16 @@ const Signup = () => {
         email: '',
         password: '',
         name: '',
-        role: 'member',
         timezone: Intl.DateTimeFormat().resolvedOptions().timeZone
     });
     const [error, setError] = useState('');
+    const [isLoading, setIsLoading] = useState(false);
+
+    // OTP Verification state
+    const [showOtpModal, setShowOtpModal] = useState(false);
+    const [pendingUserId, setPendingUserId] = useState(null);
+    const [otpError, setOtpError] = useState(null);
+    const [isVerifying, setIsVerifying] = useState(false);
 
     const handleChange = (e) => {
         setFormData({ ...formData, [e.target.name]: e.target.value });
@@ -23,6 +30,7 @@ const Signup = () => {
 
     const handleSubmit = async (e) => {
         e.preventDefault();
+        setError('');
 
         // Password Validation
         const passwordRegex = /^(?=.*[a-z])(?=.*[A-Z])(?=.*\d)(?=.*[@$!%*?&])[A-Za-z\d@$!%*?&]{8,}$/;
@@ -31,6 +39,7 @@ const Signup = () => {
             return;
         }
 
+        setIsLoading(true);
         try {
             const response = await fetch('http://localhost:3000/api/auth/signup', {
                 method: 'POST',
@@ -40,15 +49,61 @@ const Signup = () => {
 
             const data = await response.json();
 
-            if (response.ok) {
-                // Store authentication state
-                localStorage.setItem('userId', data.userId);
-                navigate('/landing');
+            if (response.ok || data.pendingVerification) {
+                // Show OTP verification modal
+                setPendingUserId(data.userId);
+                setShowOtpModal(true);
             } else {
                 setError(data.error || 'Signup failed');
             }
         } catch {
             setError('Connection failed. Is the server running?');
+        } finally {
+            setIsLoading(false);
+        }
+    };
+
+    const handleVerifyOtp = async (otp) => {
+        setOtpError(null);
+        setIsVerifying(true);
+
+        try {
+            const response = await fetch('http://localhost:3000/api/auth/verify-otp', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ userId: pendingUserId, otp }),
+            });
+
+            const data = await response.json();
+
+            if (response.ok) {
+                // Verification successful
+                localStorage.setItem('userId', data.userId);
+                navigate('/teams');
+            } else {
+                setOtpError(data.error || 'Verification failed');
+            }
+        } catch {
+            setOtpError('Connection failed. Please try again.');
+        } finally {
+            setIsVerifying(false);
+        }
+    };
+
+    const handleResendOtp = async () => {
+        try {
+            const response = await fetch('http://localhost:3000/api/auth/resend-otp', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ userId: pendingUserId }),
+            });
+
+            if (!response.ok) {
+                const data = await response.json();
+                setOtpError(data.error || 'Failed to resend OTP');
+            }
+        } catch {
+            setOtpError('Connection failed. Please try again.');
         }
     };
 
@@ -89,6 +144,7 @@ const Signup = () => {
                         value={formData.email}
                         onChange={handleChange}
                         required
+                        autoComplete="username"
                     />
                     <div className="flex flex-col gap-1">
                         <NeoInput
@@ -99,29 +155,23 @@ const Signup = () => {
                             value={formData.password}
                             onChange={handleChange}
                             required
+                            autoComplete="new-password"
                         />
                         <p className="text-xs font-bold text-black mt-1">
                             * Must be at least 8 chars, incl. 1 uppercase, 1 lowercase, 1 number, 1 special char.
                         </p>
                     </div>
 
-                    {/* Role Selection - Simplified as native select with brutalist border */}
-                    <div className="flex flex-col gap-2 w-full">
-                        <label className="font-bold text-black uppercase">Role</label>
-                        <select
-                            name="role"
-                            value={formData.role}
-                            onChange={handleChange}
-                            className="w-full bg-white text-black font-medium py-3 px-4 border-4 border-black shadow-neo-sm outline-none focus:bg-neo-white focus:shadow-neo transition-all"
-                        >
-                            <option value="member">Member</option>
-                            <option value="host">Host</option>
-                        </select>
-                    </div>
 
-
-                    <NeoButton type="submit" className="mt-4 bg-neo-teal">
-                        Create Account
+                    <NeoButton type="submit" className="mt-4 bg-neo-teal" disabled={isLoading}>
+                        {isLoading ? (
+                            <>
+                                <Loader2 size={18} className="animate-spin mr-2" />
+                                Creating Account...
+                            </>
+                        ) : (
+                            'Create Account'
+                        )}
                     </NeoButton>
                 </form>
 
@@ -132,6 +182,18 @@ const Signup = () => {
                     </Link>
                 </p>
             </NeoCard>
+
+            {/* OTP Verification Modal */}
+            {showOtpModal && (
+                <OtpVerification
+                    email={formData.email}
+                    userId={pendingUserId}
+                    onVerify={handleVerifyOtp}
+                    onResend={handleResendOtp}
+                    isLoading={isVerifying}
+                    error={otpError}
+                />
+            )}
         </div>
     );
 };

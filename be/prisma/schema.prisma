@@ -13,29 +13,45 @@ datasource db {
 // 1. Users & Teams
 
 model User {
-  id        String   @id @default(uuid()) @db.Uuid
-  name      String?  @db.VarChar(100)
-  password  String   @default("") // Added for auth flow
-  email     String?  @unique @db.VarChar(150)
-  role      String?  @db.VarChar(30) // "admin", "member"
-  timezone  String?  @db.VarChar(50)
-  createdAt DateTime @default(now()) @map("created_at")
+  id         String   @id @default(uuid()) @db.Uuid
+  name       String?  @db.VarChar(100)
+  password   String   @default("") // Added for auth flow
+  email      String?  @unique @db.VarChar(150)
+  role       String?  @db.VarChar(30) // "admin", "member"
+  timezone   String?  @db.VarChar(50)
+  isVerified Boolean  @default(false) @map("is_verified")
+  createdAt  DateTime @default(now()) @map("created_at")
 
   // Relations
-  teamMembers         TeamMember[]
-  organizedMeetings   Meeting[]             @relation("OrganizedMeetings")
+  teamMembers           TeamMember[]
+  organizedMeetings     Meeting[]             @relation("OrganizedMeetings")
   meetingParticipations MeetingParticipant[]
-  assignedTasks       Task[]
-  workloads           UserWorkload[]
-  smartSchedules      SmartSchedule[]
+  assignedTasks         Task[]
+  workloads             UserWorkload[]
+  smartSchedules        SmartSchedule[]
+  otpCodes              OtpCode[]
 
   @@map("users")
 }
 
-model Team {
+model OtpCode {
   id        String   @id @default(uuid()) @db.Uuid
-  name      String?  @db.VarChar(100)
+  userId    String   @map("user_id") @db.Uuid
+  code      String   @db.VarChar(6)
+  expiresAt DateTime @map("expires_at")
+  used      Boolean  @default(false)
   createdAt DateTime @default(now()) @map("created_at")
+
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@map("otp_codes")
+}
+
+model Team {
+  id         String   @id @default(uuid()) @db.Uuid
+  name       String?  @db.VarChar(100)
+  inviteCode String?  @unique @map("invite_code") @db.VarChar(10)
+  createdAt  DateTime @default(now()) @map("created_at")
 
   // Relations
   members   TeamMember[]
