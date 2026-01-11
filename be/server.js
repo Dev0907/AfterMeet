@@ -29,7 +29,7 @@ const log = (type, route, message, data = null) => {
 app.use((req, res, next) => {
   log('REQUEST', `${req.method} ${req.path}`, 'Incoming request', req.body?.meeting_id || req.query?.userId || '');
   const originalSend = res.send;
-  res.send = function(body) {
+  res.send = function (body) {
     log('RESPONSE', `${req.method} ${req.path}`, `Status: ${res.statusCode}`);
     return originalSend.call(this, body);
   };
@@ -47,10 +47,12 @@ app.get('/health', (req, res) => {
 
 // Analyze transcript
 app.post('/api/analyze', async (req, res) => {
+  console.log(req.body);
+
   log('AI', '/api/analyze', 'Starting transcript analysis', { meeting_id: req.body.meeting_id });
   try {
     const { transcript, meeting_id } = req.body;
-    
+
     if (!transcript) {
       return res.status(400).json({ error: 'Transcript is required' });
     }
@@ -63,17 +65,18 @@ app.post('/api/analyze', async (req, res) => {
     });
 
     log('AI', '/api/analyze', 'Sending file to Python API');
-    
+
     const response = await axios.post(`${PYTHON_API_URL}/api/analyze`, formData, {
       headers: {
         ...formData.getHeaders(),
       },
       timeout: 120000,
     });
-    
+
     const data = response.data;
     const pythonMeetingId = data.meeting_id;
     log('AI', '/api/analyze', 'Python API response received', { status: response.status, pythonMeetingId });
+    console.log('[AI] Python response tasks:', data.tasks);
 
     const meetingId = meeting_id;
 
@@ -94,6 +97,111 @@ app.post('/api/analyze', async (req, res) => {
         create: { meetingId, summary: JSON.stringify(analysisPackage) }
       });
 
+      // Create tasks from the analysis
+      if (data.tasks && Array.isArray(data.tasks)) {
+        console.log('[AI] Storing tasks to DB:', data.tasks);
+        // Get team members for this meeting
+        const meeting = await prisma.meeting.findUnique({
+          where: { id: meetingId },
+          include: {
+            team: {
+              include: {
+                members: {
+                  include: { user: true }
+                }
+              }
+            }
+          }
+        });
+
+        const teamMembers = meeting?.team?.members || [];
+        const meetingCreatorId = meeting?.createdBy; // Define fallback creator ID
+
+        // First, delete existing tasks for this meeting
+        // Accumulate tasks: do not delete existing tasks for this meeting
+
+        // Create new tasks
+        for (const taskData of data.tasks) {
+          try {
+            // Find users by name/email if owner is specified
+            let assignees = [];
+
+            if (taskData.owner) {
+              const potentialOwners = taskData.owner.split(/[,&]/).map(s => s.trim()).filter(Boolean);
+
+              for (const ownerName of potentialOwners) {
+                // First try exact name match
+                let user = teamMembers.find(member =>
+                  member.user.name?.toLowerCase() === ownerName.toLowerCase()
+                )?.user;
+
+                // If not found, try partial name match
+                if (!user) {
+                  user = teamMembers.find(member =>
+                    member.user.name?.toLowerCase().includes(ownerName.toLowerCase()) ||
+                    ownerName.toLowerCase().includes(member.user.name?.toLowerCase())
+                  )?.user;
+                }
+
+                // If still not found, try email
+                if (!user) {
+                  user = teamMembers.find(member =>
+                    member.user.email?.toLowerCase().includes(ownerName.toLowerCase().split(' ')[0])
+                  )?.user;
+                }
+
+                if (user) {
+                  if (!assignees.includes(user.id)) {
+                    assignees.push(user.id);
+                  }
+                }
+              }
+            }
+
+            // Fallback if no specific owners found
+            if (assignees.length === 0) {
+              console.log(`[AI Task] Could not find any users for owner string: "${taskData.owner}". Falling back to creator.`);
+              if (meetingCreatorId) {
+                assignees.push(meetingCreatorId);
+              } else if (meeting?.organizerId) {
+                assignees.push(meeting.organizerId);
+              }
+            }
+
+            if (assignees.length === 0) {
+              console.log(`[AI Task] CRITICAL: No assignees found (not even creator). Skipping task.`);
+              continue;
+            }
+
+            console.log(`[Task Creation] Creating ${assignees.length} copies of task for meeting ${meetingId}:`, taskData.task);
+
+            // Create a task for EACH assignee
+            for (const assignedTo of assignees) {
+              console.log(`[Task Creation] Assigning copy to: ${assignedTo}`);
+              if (assignedTo) {  // Double check existence
+
+                const newTask = await prisma.task.create({
+                  data: {
+                    meetingId,
+                    title: taskData.task || taskData.title || 'Untitled Task',
+                    description: taskData.urgency_reason || taskData.description || '',
+                    assignedTo,
+                    priority: getPriorityFromUrgency(taskData.urgency),
+                    status: 'pending',
+                    dueDate: taskData.deadline ? new Date(taskData.deadline) : null
+                  }
+                });
+                console.log(`[Task Creation] Success! Task ID: ${newTask.id}`);
+              }
+            }
+          } catch (taskError) {
+            console.error('[Task Creation] FAILED:', taskError);
+            // Continue with other tasks
+          }
+        }
+
+      }
+
       if (data.transcript && Array.isArray(data.transcript)) {
         await prisma.meetingTranscript.deleteMany({
           where: { meetingId }
@@ -111,7 +219,7 @@ app.post('/api/analyze', async (req, res) => {
         });
       }
     }
-    
+
     log('AI', '/api/analyze', 'Analysis complete with python_meeting_id:', pythonMeetingId);
     res.json({ ...data, python_meeting_id: pythonMeetingId });
   } catch (error) {
@@ -128,17 +236,17 @@ app.post('/api/analyze', async (req, res) => {
 app.post('/api/meetings/:meetingId/chat', async (req, res) => {
   const pythonMeetingId = req.body.python_meeting_id;
   log('AI', '/api/meetings/chat', 'Chat request', { dbMeetingId: req.params.meetingId, pythonMeetingId, question: req.body.question?.substring(0, 50) });
-  
+
   if (!pythonMeetingId) {
     return res.status(400).json({ error: 'python_meeting_id is required. Please analyze the meeting first.' });
   }
-  
+
   try {
     const response = await axios.post(`${PYTHON_API_URL}/api/chat`, {
       meeting_id: pythonMeetingId,
       question: req.body.question
     }, { timeout: 60000 });
-    
+
     log('AI', '/api/meetings/chat', 'Chat response received', { answer: response.data.answer?.substring(0, 100) });
     res.json(response.data);
   } catch (error) {
@@ -419,6 +527,51 @@ app.post('/api/auth/signin', async (req, res) => {
 });
 
 // ============================================
+// Tasks Routes
+// ============================================
+
+// Get all tasks for a team (for Calendar & Kanban)
+app.get('/api/teams/:teamId/tasks', async (req, res) => {
+  const { teamId } = req.params;
+  const { userId } = req.query;
+
+  try {
+    // Check membership
+    const membership = await prisma.teamMember.findUnique({
+      where: { teamId_userId: { teamId, userId } }
+    });
+
+    if (!membership) {
+      return res.status(403).json({ error: 'Not a member of this team' });
+    }
+
+    // Get all meetings for this team to find linked tasks
+    const meetings = await prisma.meeting.findMany({
+      where: { teamId },
+      select: { id: true }
+    });
+
+    const meetingIds = meetings.map(m => m.id);
+
+    const tasks = await prisma.task.findMany({
+      where: {
+        meetingId: { in: meetingIds }
+      },
+      include: {
+        assignee: { select: { id: true, name: true, email: true } },
+        meeting: { select: { title: true, scheduledStart: true } }
+      },
+      orderBy: { dueDate: 'asc' }
+    });
+
+    res.json(tasks);
+  } catch (error) {
+    console.error('Get team tasks error:', error);
+    res.status(500).json({ error: 'Failed to fetch team tasks' });
+  }
+});
+
+// ============================================
 // Teams Routes
 // ============================================
 
@@ -442,13 +595,22 @@ app.get('/api/teams', async (req, res) => {
           include: { user: { select: { id: true, name: true, email: true } } }
         },
         meetings: {
-          select: { id: true }
+          select: { id: true, scheduledStart: true, createdAt: true }
         }
       }
     });
 
     const teamsWithStats = teams.map(team => {
       const userRole = team.members.find(m => m.userId === userId)?.role || 'member';
+      // Find the latest meeting date (if any)
+      let lastMeeting = null;
+      if (team.meetings && team.meetings.length > 0) {
+        lastMeeting = team.meetings.reduce((latest, m) => {
+          const date = m.scheduledStart || m.createdAt;
+          if (!latest) return date;
+          return new Date(date) > new Date(latest) ? date : latest;
+        }, null);
+      }
       return {
         id: team.id,
         name: team.name,
@@ -460,7 +622,8 @@ app.get('/api/teams', async (req, res) => {
           ...m.user,
           role: m.role
         })),
-        role: userRole
+        role: userRole,
+        lastMeeting
       };
     });
 
@@ -1185,6 +1348,249 @@ function generateInviteCode() {
   }
   return code;
 }
+
+function getPriorityFromUrgency(urgency) {
+  if (!urgency) return 'medium';
+  switch (urgency.toLowerCase()) {
+    case 'critical':
+    case 'high': return 'high';
+    case 'medium': return 'medium';
+    case 'low': return 'low';
+    default: return 'medium';
+  }
+}
+
+// ============================================
+// Task Management Routes
+// ============================================
+
+// Get tasks for a user (their personal Kanban board)
+app.get('/api/tasks', async (req, res) => {
+  try {
+    const { userId } = req.query;
+    const uuidRegex = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
+    if (!userId || !uuidRegex.test(userId)) {
+      return res.status(400).json({ error: 'Invalid user ID' });
+    }
+
+    const tasks = await prisma.task.findMany({
+      where: { assignedTo: userId },
+      include: {
+        meeting: {
+          select: { id: true, title: true, teamId: true }
+        },
+        assignee: {
+          select: { id: true, name: true, email: true }
+        }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+
+    res.json(tasks);
+  } catch (error) {
+    console.error('Get tasks error:', error);
+    res.status(500).json({ error: 'Failed to get tasks' });
+  }
+});
+
+// Get tasks for a specific team member (for team host viewing)
+app.get('/api/teams/:teamId/members/:memberId/tasks', async (req, res) => {
+  try {
+    const { teamId, memberId } = req.params;
+    const { userId } = req.query; // The user making the request
+
+    if (!userId) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
+
+    // Check if the requesting user is the team owner
+    const teamMember = await prisma.teamMember.findFirst({
+      where: { teamId, userId, role: 'owner' }
+    });
+
+    if (!teamMember) {
+      return res.status(403).json({ error: 'Only team owners can view other members\' tasks' });
+    }
+
+    // Check if memberId is actually a member of this team
+    const memberInTeam = await prisma.teamMember.findFirst({
+      where: { teamId, userId: memberId }
+    });
+
+    if (!memberInTeam) {
+      return res.status(404).json({ error: 'Member not found in this team' });
+    }
+
+    console.log(`[API] Fetching tasks for member ${memberId} in team ${teamId}`);
+    const tasks = await prisma.task.findMany({
+      where: { assignedTo: memberId },
+      include: {
+        meeting: {
+          select: { id: true, title: true, teamId: true }
+        },
+        assignee: {
+          select: { id: true, name: true, email: true }
+        }
+      },
+      orderBy: { createdAt: 'desc' }
+    });
+    console.log(`[API] Found ${tasks.length} tasks for member ${memberId}`);
+
+    res.json(tasks);
+  } catch (error) {
+    console.error('Get member tasks error:', error);
+    res.status(500).json({ error: 'Failed to get member tasks' });
+  }
+});
+
+// Create a new task
+app.post('/api/tasks', async (req, res) => {
+  try {
+    const { title, description, assignedTo, meetingId, priority, status, dueDate } = req.body;
+
+    if (!title || !assignedTo) {
+      return res.status(400).json({ error: 'Title and assignedTo are required' });
+    }
+
+    const task = await prisma.task.create({
+      data: {
+        title,
+        description,
+        assignedTo,
+        meetingId,
+        priority: priority || 'medium',
+        status: status || 'pending',
+        dueDate: dueDate ? new Date(dueDate) : null
+      },
+      include: {
+        meeting: {
+          select: { id: true, title: true, teamId: true }
+        },
+        assignee: {
+          select: { id: true, name: true, email: true }
+        }
+      }
+    });
+
+    res.json(task);
+  } catch (error) {
+    console.error('Create task error:', error);
+    res.status(500).json({ error: 'Failed to create task' });
+  }
+});
+
+// Update a task
+app.put('/api/tasks/:taskId', async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const { title, description, assignedTo, priority, status, dueDate } = req.body;
+    const { userId } = req.query;
+
+    if (!userId) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
+
+    // Check if user can update this task (either assignee or team owner)
+    const task = await prisma.task.findUnique({
+      where: { id: taskId },
+      include: {
+        meeting: {
+          include: {
+            team: {
+              include: {
+                members: true
+              }
+            }
+          }
+        }
+      }
+    });
+
+    if (!task) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
+
+    const isAssignee = task.assignedTo === userId;
+    const isTeamOwner = task.meeting?.team?.members.some(m => m.userId === userId && m.role === 'owner');
+
+    if (!isAssignee && !isTeamOwner) {
+      return res.status(403).json({ error: 'You can only update tasks assigned to you or if you are the team owner' });
+    }
+
+    const updatedTask = await prisma.task.update({
+      where: { id: taskId },
+      data: {
+        title,
+        description,
+        assignedTo,
+        priority,
+        status,
+        dueDate: dueDate ? new Date(dueDate) : null
+      },
+      include: {
+        meeting: {
+          select: { id: true, title: true, teamId: true }
+        },
+        assignee: {
+          select: { id: true, name: true, email: true }
+        }
+      }
+    });
+
+    res.json(updatedTask);
+  } catch (error) {
+    console.error('Update task error:', error);
+    res.status(500).json({ error: 'Failed to update task' });
+  }
+});
+
+// Delete a task
+app.delete('/api/tasks/:taskId', async (req, res) => {
+  try {
+    const { taskId } = req.params;
+    const { userId } = req.query;
+
+    if (!userId) {
+      return res.status(400).json({ error: 'userId is required' });
+    }
+
+    // Check if user can delete this task (either assignee or team owner)
+    const task = await prisma.task.findUnique({
+      where: { id: taskId },
+      include: {
+        meeting: {
+          include: {
+            team: {
+              include: {
+                members: true
+              }
+            }
+          }
+        }
+      }
+    });
+
+    if (!task) {
+      return res.status(404).json({ error: 'Task not found' });
+    }
+
+    const isAssignee = task.assignedTo === userId;
+    const isTeamOwner = task.meeting?.team?.members.some(m => m.userId === userId && m.role === 'owner');
+
+    if (!isAssignee && !isTeamOwner) {
+      return res.status(403).json({ error: 'You can only delete tasks assigned to you or if you are the team owner' });
+    }
+
+    await prisma.task.delete({
+      where: { id: taskId }
+    });
+
+    res.json({ message: 'Task deleted successfully' });
+  } catch (error) {
+    console.error('Delete task error:', error);
+    res.status(500).json({ error: 'Failed to delete task' });
+  }
+});
 
 app.listen(PORT, () => {
   console.log(`Server running on http://localhost:${PORT}`);

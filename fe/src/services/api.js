@@ -71,4 +71,13 @@ export const aiApi = {
     scheduleJoin: (data) => api.post('/api/schedule-join', data),
 };
 
+export const tasksApi = {
+    getUserTasks: (userId) => api.get('/api/tasks', { params: { userId } }),
+    getMemberTasks: (teamId, memberId, userId) => api.get(`/api/teams/${teamId}/members/${memberId}/tasks`, { params: { userId } }),
+    getTeamTasks: (teamId, userId) => api.get(`/api/teams/${teamId}/tasks`, { params: { userId } }),
+    create: (data) => api.post('/api/tasks', data),
+    update: (taskId, data, userId) => api.put(`/api/tasks/${taskId}`, data, { params: { userId } }),
+    delete: (taskId, userId) => api.delete(`/api/tasks/${taskId}`, { params: { userId } }),
+};
+
 export default api;

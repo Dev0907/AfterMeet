@@ -6,6 +6,7 @@ import NeoBadge from '../components/ui/NeoBadge';
 import { NeoSkeletonCard } from '../components/ui/NeoSkeleton';
 import MeetingChat from '../components/meeting/MeetingChat';
 import SemanticSearch from '../components/meeting/SemanticSearch';
+import ActionItems from '../components/meeting/ActionItems';
 import {
     ArrowLeft, Calendar, Clock, Users, FileText, CheckCircle, AlertCircle,
     MessageSquare, ChevronDown, ChevronUp, BarChart3, Loader2, Sparkles, Filter,
@@ -25,9 +26,10 @@ const MeetingDetail = () => {
     const [isLoading, setIsLoading] = useState(true);
     const [isAnalyzing, setIsAnalyzing] = useState(false);
     const [error, setError] = useState(null);
-    const [priorityFilter, setPriorityFilter] = useState('all');
-    const [expandedSections, setExpandedSections] = useState({ summary: true, actionItems: true, decisions: false, transcript: true });
+    const [tasksAdded, setTasksAdded] = useState(false);
+    const [tasksCount, setTasksCount] = useState(0);
     const [filteredTranscript, setFilteredTranscript] = useState(null);
+    const [expandedSections, setExpandedSections] = useState({ summary: true, actionItems: true, decisions: false, transcript: true });
 
     useEffect(() => { window.scrollTo(0, 0); }, []);
 
@@ -84,6 +86,15 @@ const MeetingDetail = () => {
                     id: i, speaker: t.speaker_name || t.speaker || 'Speaker',
                     text: t.text, timestamp: t.timestamp || '--:--', sentiment: t.sentiment || 'neutral'
                 })));
+            }
+
+            // Show success message about automatic task creation
+            if (data.tasks && data.tasks.length > 0) {
+                setTasksAdded(true);
+                setTasksCount(data.tasks.length);
+                alert(`✅ AI analysis complete! ${data.tasks.length} action item(s) have been automatically added to your Kanban board with proper deadlines and priorities.`);
+            } else {
+                alert('✅ AI analysis complete! Meeting insights are now available.');
             }
         } catch (err) {
             console.error('Error analyzing transcript:', err);
@@ -239,42 +250,29 @@ const MeetingDetail = () => {
 
                         {(aiSummary?.tasks || meeting?.summary?.tasks || aiSummary?.action_items || meeting?.summary?.action_items)?.length > 0 && (
                             <NeoCard>
-                                <button onClick={() => toggleSection('actionItems')} className="w-full flex items-center justify-between font-black text-xl uppercase">
-                                    <span className="flex items-center gap-2"><CheckCircle size={24} />Meeting Minutes ({(aiSummary?.tasks || meeting?.summary?.tasks || aiSummary?.action_items || meeting?.summary?.action_items)?.length})</span>
-                                    {expandedSections.actionItems ? <ChevronUp /> : <ChevronDown />}
-                                </button>
+                                <div className="flex items-center justify-between">
+                                    <button onClick={() => toggleSection('actionItems')} className="flex items-center gap-2 font-black text-xl uppercase flex-1">
+                                        <span className="flex items-center gap-2"><CheckCircle size={24} />Meeting Minutes ({(aiSummary?.tasks || meeting?.summary?.tasks || aiSummary?.action_items || meeting?.summary?.action_items)?.length})</span>
+                                        {expandedSections.actionItems ? <ChevronUp /> : <ChevronDown />}
+                                    </button>
+                                    <div className="flex flex-col gap-2">
+                                        {tasksAdded && (
+                                            <div className="px-3 py-1 bg-green-100 border-2 border-green-500 text-green-800 font-bold text-sm text-center">
+                                                ✅ {tasksCount} task(s) added to Kanban!
+                                            </div>
+                                        )}
+                                        <Link to={`/teams/${teamId}/kanban`} className="flex items-center gap-2 px-4 py-2 bg-neo-yellow border-4 border-black font-bold shadow-neo hover:translate-x-0.5 hover:translate-y-0.5 hover:shadow-neo-hover transition-all">
+                                            <CheckCircle size={16} />
+                                            View Kanban
+                                        </Link>
+                                    </div>
+                                </div>
                                 {expandedSections.actionItems && (
                                     <div className="mt-4 pt-4 border-t-2 border-black">
-                                        <div className="flex flex-wrap items-center gap-2 mb-4">
-                                            <Filter size={16} className="text-gray-600" /><span className="text-sm font-bold uppercase">Filter:</span>
-                                            {['all', 'critical', 'high', 'medium', 'low'].map(priority => (
-                                                <button key={priority} onClick={() => setPriorityFilter(priority)}
-                                                    className={`px-3 py-1 text-xs font-bold uppercase border-2 border-black transition-all ${priorityFilter === priority ? 'bg-neo-dark text-white' : priority === 'critical' ? 'bg-red-100 hover:bg-red-200' : priority === 'high' ? 'bg-orange-100 hover:bg-orange-200' : priority === 'medium' ? 'bg-yellow-100 hover:bg-yellow-200' : priority === 'low' ? 'bg-green-100 hover:bg-green-200' : 'bg-white hover:bg-gray-100'}`}>
-                                                    {priority}
-                                                </button>
-                                            ))}
-                                        </div>
-                                        <div className="space-y-3">
-                                            {(aiSummary?.tasks || meeting?.summary?.tasks || aiSummary?.action_items || meeting?.summary?.action_items)
-                                                .filter(item => priorityFilter === 'all' || item.urgency === priorityFilter)
-                                                .sort((a, b) => (PRIORITY_ORDER[a.urgency] || 3) - (PRIORITY_ORDER[b.urgency] || 3))
-                                                .map((item, i) => (
-                                                    <div key={i} className={`p-3 border-4 border-black ${getUrgencyColor(item.urgency)}`}>
-                                                        <div className="flex items-start justify-between gap-2">
-                                                            <p className="font-bold">{item.task}</p>
-                                                            <NeoBadge variant={item.urgency} size="sm">{item.urgency}</NeoBadge>
-                                                        </div>
-                                                        <div className="flex flex-wrap gap-3 mt-2 text-sm font-medium">
-                                                            {item.owner && <span className="flex items-center gap-1"><Users size={12} />{item.owner}</span>}
-                                                            {item.deadline && <span className="flex items-center gap-1"><Calendar size={12} />{item.deadline}</span>}
-                                                        </div>
-                                                        {item.urgency_reason && <p className="text-xs text-gray-600 mt-2 italic">{item.urgency_reason}</p>}
-                                                    </div>
-                                                ))}
-                                            {(aiSummary?.tasks || meeting?.summary?.tasks || aiSummary?.action_items || meeting?.summary?.action_items).filter(item => priorityFilter === 'all' || item.urgency === priorityFilter).length === 0 && (
-                                                <p className="text-center text-gray-500 py-4 font-medium">No {priorityFilter} priority items</p>
-                                            )}
-                                        </div>
+                                        <ActionItems
+                                            items={aiSummary?.tasks || meeting?.summary?.tasks || aiSummary?.action_items || meeting?.summary?.action_items || []}
+                                            isLoading={false}
+                                        />
                                     </div>
                                 )}
                             </NeoCard>

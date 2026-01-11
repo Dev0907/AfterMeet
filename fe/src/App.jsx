@@ -9,6 +9,8 @@ import MeetingDetail from './pages/MeetingDetail';
 import MeetingAnalytics from './pages/MeetingAnalytics';
 import JoinTeam from './pages/JoinTeam';
 import LandingPage from './pages/LandingPage';
+import KanbanPage from './pages/KanbanPage';
+import TeamCalendarPage from './pages/TeamCalendarPage';
 
 import ProtectedRoute from './components/ProtectedRoute';
 
@@ -51,12 +53,33 @@ function App() {
             <MeetingAnalytics />
           </ProtectedRoute>
         } />
+        <Route path="/teams/:teamId/kanban" element={
+          <ProtectedRoute>
+            <KanbanPage />
+          </ProtectedRoute>
+        } />
+        <Route path="/teams/:teamId/kanban/team" element={
+          <ProtectedRoute>
+            <KanbanPage />
+          </ProtectedRoute>
+        } />
+        <Route path="/teams/:teamId/members/:memberId/kanban" element={
+          <ProtectedRoute>
+            <KanbanPage />
+          </ProtectedRoute>
+        } />
+        <Route path="/teams/:teamId/calendar" element={
+          <ProtectedRoute>
+            <TeamCalendarPage />
+          </ProtectedRoute>
+        } />
 
         {/* Legacy/Redirects */}
         <Route path="/landing" element={<Navigate to="/" replace />} />
         <Route path="/dashboard" element={<Navigate to="/teams" replace />} />
         <Route path="/meetings" element={<Navigate to="/teams" replace />} />
         <Route path="/meetings/:meetingId" element={<Navigate to="/teams" replace />} />
+        <Route path="*" element={<div>Page not found</div>} />
       </Routes>
     </div>
   );

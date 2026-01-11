@@ -30,7 +30,14 @@ class MeetingAnalyzer:
         For tags, assign relevant categories like: development, documentation, testing, review, planning, communication, etc.
         """
 
-        user_prompt = f"""Analyze this meeting transcript and return ONLY valid JSON:
+        user_prompt = f"""Current Date: {datetime.now().strftime('%Y-%m-%d')}
+Analyze this meeting transcript and return ONLY valid JSON.
+Resolve relative dates (e.g., "next Friday", "tomorrow") to absolute dates based on the Current Date.
+
+CRITICAL INSTRUCTION: Capture EVERY SINGLE action item, task, or to-do discussed, no matter how small.
+If a person is assigned a task, it MUST be included.
+If a deadline is mentioned, standardise it to YYYY-MM-DD.
+If no deadline is mentioned, set "deadline" to null.
 
 Transcript:
 {transcript_text}
@@ -41,9 +48,9 @@ Required JSON structure:
   "action_items": [
     {{
       "task": "description",
-      "owner": "person name",
+      "owner": "person name (exact name from transcript)",
       "deadline": "YYYY-MM-DD or null",
-      "urgency_reason": "detailed explanation of task importance, context, and time sensitivity",
+      "urgency_reason": "detailed explanation",
       "tags": ["tag1", "tag2"]
     }}
   ],

@@ -74,7 +74,7 @@ const TeamMeetings = () => {
     }, [teamId]);
 
     const copyInviteLink = () => {
-        navigator.clipboard.writeText(`${window.location.origin}/join/${inviteCode}`);
+        navigator.clipboard.writeText(inviteCode);
         setCopiedInvite(true);
         setTimeout(() => setCopiedInvite(false), 2000);
     };
@@ -301,6 +301,7 @@ const TeamMeetings = () => {
                         <div className="flex gap-2 flex-wrap">
                             {userRole === 'owner' && (
                                 <>
+                                    <NeoButton onClick={() => navigate(`/teams/${teamId}/calendar`)} className="bg-white"><Calendar size={18} className="mr-2" />Calendar</NeoButton>
                                     <NeoButton onClick={() => setShowInviteModal(true)} className="bg-white"><Link2 size={18} className="mr-2" />Invite</NeoButton>
                                     <NeoButton onClick={openSettings} className="bg-white"><Settings size={18} className="mr-2" />Settings</NeoButton>
                                 </>
@@ -419,10 +420,6 @@ const TeamMeetings = () => {
                                 <div className="flex-1 font-mono text-2xl font-black tracking-widest">{inviteCode || 'Loading...'}</div>
                                 <button onClick={copyInviteLink} className="p-2 border-2 border-black bg-white hover:bg-neo-yellow transition-colors">{copiedInvite ? <CheckCircle size={20} /> : <Copy size={20} />}</button>
                             </div>
-                        </div>
-                        <div className="bg-neo-teal border-4 border-black p-4">
-                            <label className="block font-bold text-sm uppercase mb-2">Invite Link</label>
-                            <div className="text-sm font-mono break-all">{`${window.location.origin}/join/${inviteCode}`}</div>
                         </div>
                     </NeoCard>
                 </div>

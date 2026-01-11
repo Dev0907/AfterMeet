@@ -122,7 +122,7 @@ const ActionItems = ({ items = [], isLoading = false }) => {
                                         {item.urgency}
                                     </NeoBadge>
                                     <span className="text-lg font-bold flex-1 min-w-0">
-                                        {item.title}
+                                        {item.title || item.task}
                                     </span>
                                     <div className="flex items-center gap-4 text-sm">
                                         <span className="flex items-center gap-1 text-gray-600">
@@ -143,17 +143,10 @@ const ActionItems = ({ items = [], isLoading = false }) => {
                                         Why is this urgent?
                                     </h4>
                                     <p className="font-medium">
-                                        {item.urgencyReason || 'No additional context provided.'}
+                                        {item.urgencyReason || item.urgency_reason || 'No additional context provided.'}
                                     </p>
                                 </div>
-                                <div className="flex gap-2">
-                                    <button className="px-3 py-1 text-sm font-bold bg-neo-teal border-2 border-black hover:shadow-neo-sm transition-all">
-                                        Mark Complete
-                                    </button>
-                                    <button className="px-3 py-1 text-sm font-bold bg-white border-2 border-black hover:bg-neo-yellow transition-all">
-                                        Reassign
-                                    </button>
-                                </div>
+
                             </div>
                         </NeoExpandable>
                     ))
